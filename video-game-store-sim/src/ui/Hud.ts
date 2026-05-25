@@ -11,8 +11,6 @@ export class Hud {
 
   private readonly lines: Phaser.GameObjects.Text;
 
-  private readonly endDayButtonLabel: Phaser.GameObjects.Text;
-
   constructor(config: HudConfig) {
     this.scene = config.scene;
 
@@ -32,7 +30,7 @@ export class Hud {
       .setInteractive({ cursor: 'pointer' })
       .setDepth(11);
 
-    this.endDayButtonLabel = this.scene.add
+    this.scene.add
       .text(720, 560, 'End Day', {
         color: '#ffffff',
         fontSize: '20px',
@@ -52,7 +50,5 @@ export class Hud {
     this.lines.setText(
       `Day: ${state.day}   Money: $${state.money}   Reputation: ${state.reputation}   Inventory: ${totalInventory}   Sold Today: ${state.soldToday}`
     );
-
-    this.endDayButtonLabel.setText('End Day');
   }
 }

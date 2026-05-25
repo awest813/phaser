@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { CUSTOMER_TYPES } from '../data/customers';
 import { ITEMS_BY_ID } from '../data/items';
-import type { CustomerPhase, ItemData, ShelfData, StoreState } from '../types/GameTypes';
+import type { CustomerPhase, ItemData, ShelfData } from '../types/GameTypes';
 import { EconomySystem } from './EconomySystem';
 import { InventorySystem } from './InventorySystem';
 
@@ -16,7 +16,6 @@ type CustomerAgent = {
 
 type CustomerSystemConfig = {
   scene: Phaser.Scene;
-  storeState: StoreState;
   shelves: ShelfData[];
   inventorySystem: InventorySystem;
   economySystem: EconomySystem;
@@ -27,8 +26,6 @@ type CustomerSystemConfig = {
 
 export class CustomerSystem {
   private readonly scene: Phaser.Scene;
-
-  private readonly storeState: StoreState;
 
   private readonly shelves: ShelfData[];
 
@@ -48,7 +45,6 @@ export class CustomerSystem {
 
   constructor(config: CustomerSystemConfig) {
     this.scene = config.scene;
-    this.storeState = config.storeState;
     this.shelves = config.shelves;
     this.inventorySystem = config.inventorySystem;
     this.economySystem = config.economySystem;
@@ -174,7 +170,5 @@ export class CustomerSystem {
 
     this.economySystem.recordSale(pickedItem);
     this.onSale(pickedItem, customer.sprite.x, customer.sprite.y - 20);
-
-    this.storeState.reputation += 0;
   }
 }

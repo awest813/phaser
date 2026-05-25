@@ -37,7 +37,6 @@ export class StoreScene extends Phaser.Scene {
 
     this.customerSystem = new CustomerSystem({
       scene: this,
-      storeState: this.storeState,
       shelves: SHELVES,
       inventorySystem: this.inventorySystem,
       economySystem: this.economySystem,

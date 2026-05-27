@@ -150,6 +150,7 @@ export class StoreScene extends Phaser.Scene {
   private newGame(): void {
     SaveSystem.clear();
     this.scene.stop('UIScene');
+    this.scene.stop('StoreScene');
     this.scene.start('BootScene');
   }
 

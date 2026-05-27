@@ -27,7 +27,7 @@ export class EconomySystem {
     const rentPaid = this.state.rent;
 
     if (this.state.money < 0) {
-      return { rentPaid, nextDay: this.state.day, newRent: this.state.rent, gameOver: true };
+      return { rentPaid, nextDay: this.state.day, newRent: this.state.rent + 5, gameOver: true };
     }
 
     this.state.rent += 5;

@@ -13,15 +13,27 @@ export class EconomySystem {
     this.state.reputation += 1;
   }
 
-  endDay(): { rentPaid: number; nextDay: number } {
+  buyStock(item: ItemData): boolean {
+    if (this.state.money < item.buyPrice) {
+      return false;
+    }
+
+    this.state.money -= item.buyPrice;
+    return true;
+  }
+
+  endDay(): { rentPaid: number; nextDay: number; newRent: number; gameOver: boolean } {
     this.state.money -= this.state.rent;
     const rentPaid = this.state.rent;
+
+    if (this.state.money < 0) {
+      return { rentPaid, nextDay: this.state.day, newRent: this.state.rent, gameOver: true };
+    }
+
+    this.state.rent += 5;
     this.state.day += 1;
     this.state.soldToday = 0;
 
-    return {
-      rentPaid,
-      nextDay: this.state.day
-    };
+    return { rentPaid, nextDay: this.state.day, newRent: this.state.rent, gameOver: false };
   }
 }

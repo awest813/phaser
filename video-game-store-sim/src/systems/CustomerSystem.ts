@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { CUSTOMER_TYPES } from '../data/customers';
 import { ITEMS_BY_ID } from '../data/items';
-import type { CustomerPhase, ItemData, ShelfData } from '../types/GameTypes';
+import type { CustomerPhase, ItemCategory, ItemData, ShelfData } from '../types/GameTypes';
 import { EconomySystem } from './EconomySystem';
 import { InventorySystem } from './InventorySystem';
 
@@ -10,6 +10,7 @@ type CustomerAgent = {
   state: CustomerPhase;
   shelf: ShelfData;
   budget: number;
+  preferredCategories: ItemCategory[];
   browseUntil: number;
   speed: number;
 };
@@ -73,6 +74,7 @@ export class CustomerSystem {
       state: 'ENTERING',
       shelf,
       budget,
+      preferredCategories: type.preferredCategories,
       browseUntil: 0,
       speed: Phaser.Math.FloatBetween(70, 95)
     });
@@ -152,17 +154,20 @@ export class CustomerSystem {
   }
 
   private trySale(customer: CustomerAgent): void {
-    const possibleItems = customer.shelf.itemIds
+    const affordable = customer.shelf.itemIds
       .map((itemId) => ITEMS_BY_ID[itemId])
       .filter((item) => item !== undefined)
       .filter((item) => this.inventorySystem.getQuantity(item.id) > 0)
       .filter((item) => item.sellPrice <= customer.budget);
 
-    if (possibleItems.length === 0) {
+    if (affordable.length === 0) {
       return;
     }
 
-    const pickedItem = Phaser.Utils.Array.GetRandom(possibleItems);
+    const preferred = affordable.filter((item) => customer.preferredCategories.includes(item.category));
+    const pool = preferred.length > 0 ? preferred : affordable;
+
+    const pickedItem = Phaser.Utils.Array.GetRandom(pool);
 
     if (!this.inventorySystem.takeOne(pickedItem.id)) {
       return;

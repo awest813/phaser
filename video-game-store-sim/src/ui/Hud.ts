@@ -4,6 +4,7 @@ import type { StoreState } from '../types/GameTypes';
 type HudConfig = {
   scene: Phaser.Scene;
   onEndDay: () => void;
+  onRestock: () => void;
 };
 
 export class Hud {
@@ -42,6 +43,24 @@ export class Hud {
     endDayButton.on('pointerdown', config.onEndDay);
     endDayButton.on('pointerover', () => endDayButton.setFillStyle(0x37a66a));
     endDayButton.on('pointerout', () => endDayButton.setFillStyle(0x2e8b57));
+
+    const restockButton = this.scene.add
+      .rectangle(590, 560, 120, 42, 0x2255aa)
+      .setInteractive({ cursor: 'pointer' })
+      .setDepth(11);
+
+    this.scene.add
+      .text(590, 560, 'Restock', {
+        color: '#ffffff',
+        fontSize: '20px',
+        fontFamily: 'monospace'
+      })
+      .setOrigin(0.5)
+      .setDepth(12);
+
+    restockButton.on('pointerdown', config.onRestock);
+    restockButton.on('pointerover', () => restockButton.setFillStyle(0x3377cc));
+    restockButton.on('pointerout', () => restockButton.setFillStyle(0x2255aa));
   }
 
   update(state: StoreState): void {

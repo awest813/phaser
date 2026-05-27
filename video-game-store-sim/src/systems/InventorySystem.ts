@@ -23,6 +23,10 @@ export class InventorySystem {
     return true;
   }
 
+  addOne(itemId: string): void {
+    this.state.inventory[itemId] = (this.state.inventory[itemId] ?? 0) + 1;
+  }
+
   getTotalInventory(): number {
     return Object.values(this.state.inventory).reduce((sum, count) => sum + count, 0);
   }

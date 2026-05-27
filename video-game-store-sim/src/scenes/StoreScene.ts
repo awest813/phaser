@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { ITEMS_BY_ID } from '../data/items';
 import { SHELVES } from '../data/shelves';
-import { startingStoreState, type StoreState } from '../types/GameTypes';
+import { startingStoreState, type ItemData, type StoreState } from '../types/GameTypes';
 import { CustomerSystem } from '../systems/CustomerSystem';
 import { EconomySystem } from '../systems/EconomySystem';
 import { InventorySystem } from '../systems/InventorySystem';
@@ -57,8 +57,12 @@ export class StoreScene extends Phaser.Scene {
     });
 
     this.game.events.on('store:endDay', this.endDay, this);
+    this.game.events.on('store:buyStock', this.buyStock, this);
+    this.game.events.on('store:newGame', this.newGame, this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.game.events.off('store:endDay', this.endDay, this);
+      this.game.events.off('store:buyStock', this.buyStock, this);
+      this.game.events.off('store:newGame', this.newGame, this);
     });
 
     this.emitState();
@@ -121,10 +125,33 @@ export class StoreScene extends Phaser.Scene {
     const result = this.economySystem.endDay();
     this.customerSystem.setMaxCustomers(Math.min(3 + (this.storeState.day - 1), 6));
 
+    if (result.gameOver) {
+      SaveSystem.clear();
+      this.game.events.emit('store:gameOver');
+      return;
+    }
+
     SaveSystem.save(this.storeState);
 
-    this.game.events.emit('store:message', `Rent Paid: -$${result.rentPaid}  •  Day ${result.nextDay} begins`);
+    this.game.events.emit(
+      'store:message',
+      `Rent Paid: -$${result.rentPaid}  •  Next Rent: $${result.newRent}  •  Day ${result.nextDay} begins`
+    );
     this.emitState();
+  }
+
+  private buyStock(item: ItemData): void {
+    if (this.economySystem.buyStock(item)) {
+      this.inventorySystem.addOne(item.id);
+      this.emitState();
+    }
+  }
+
+  private newGame(): void {
+    SaveSystem.clear();
+    this.scene.stop('UIScene');
+    this.scene.stop('StoreScene');
+    this.scene.start('BootScene');
   }
 
   private emitState(): void {

@@ -218,6 +218,7 @@ p { line-height: 1.45; }
 .btn.ghost { background: transparent; }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .choice { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.55rem; }
+.choice.room-choice { grid-template-columns: 1fr 1fr; }
 .choice button { min-height: 4.6rem; }
 .choice button span, .champ-meta em, .slot em { display: block; color: var(--muted); font-size: 0.8rem; font-weight: 400; }
 .filters { display: flex; flex-wrap: wrap; gap: 0.4rem; }

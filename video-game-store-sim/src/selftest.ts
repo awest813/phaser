@@ -1,5 +1,6 @@
 import {
   acceptTrade,
+  chooseRoom,
   forceTradeOffer,
   freshGoals,
   normalizeCareer,
@@ -12,7 +13,9 @@ import {
   rosterIds,
   rosterReady,
   runCircuitScrim,
-  runHouseScrim
+  runHouseScrim,
+  setPromise,
+  setStudy
 } from './game/career.ts';
 import { apply, initialApp } from './game/actions.ts';
 import { FACILITIES } from './game/facilities.ts';
@@ -104,6 +107,24 @@ function run(): void {
   assert(app.career.rivalId === 'iron', 'rival');
   assert(app.career.rivalHeat >= 12, 'rival heat');
   assert(raceLine(app.career).length > 8, 'race line');
+  assert(app.career.room && app.career.room.a.label.length > 2, 'opening room');
+  assert(app.career.players.kite.study === 'skadi', 'kite studies skadi');
+  assert(app.career.ties['boom|kite'] === -2, 'slayer friction');
+  const promised = setPromise(structuredClone(app.career), 'wolf');
+  assert(!promised.error && promised.career.promiseId === 'wolf', promised.error ?? 'promise');
+  const broke = playCurrentWeek(autofill(promised.career));
+  assert(broke.promiseId === null, 'promise spent');
+  assert(broke.players.wolf.morale < 74, `broken promise morale ${broke.players.wolf.morale}`);
+  assert(broke.lastReport?.notes.some((line) => line.includes('sat')), 'promise note');
+  const studied = setStudy(app.career, 'kite', 'artemis');
+  assert(studied.career.players.kite.study === 'artemis', 'study');
+  const offRole = setStudy(app.career, 'kite', 'athena');
+  assert(offRole.error, 'study role');
+  const answered = chooseRoom(app.career, 'a');
+  assert(!answered.error && answered.career.roomSpent, answered.error ?? 'room choice');
+  assert(answered.career.roomEcho.length > 8, 'room echo');
+  assert(chooseRoom(answered.career, 'b').error, 'room once');
+  app.career = answered.career;
   const bare = structuredClone(app.career);
   delete (bare as { offers?: unknown }).offers;
   delete (bare as { intel?: unknown }).intel;
@@ -111,9 +132,12 @@ function run(): void {
   delete (bare as { streak?: unknown }).streak;
   delete (bare as { bounty?: unknown }).bounty;
   delete (bare as { rivalId?: unknown }).rivalId;
+  delete (bare as { ties?: unknown }).ties;
+  bare.players.kite.study = '';
   normalizeCareer(bare);
   assert(Array.isArray(bare.offers) && bare.intel && Array.isArray(bare.awards), 'normalize');
   assert(bare.streak === 0 && bare.bounty === null && bare.rivalId === 'iron', 'loop defaults');
+  assert(bare.ties && bare.players.kite.study === 'skadi', 'depth defaults');
   const house = runHouseScrim(app.career);
   assert(!house.error, house.error ?? 'house');
   assert(house.career.scrimDone, 'house scrim not marked');
@@ -130,6 +154,8 @@ function run(): void {
   assert(app.career.streak === 1 || app.career.streak === -1, 'streak moved');
   assert(app.career.bounty !== null, 'bounty rerolled');
   assert((app.career.lastReport?.bountyNote ?? '').startsWith('Bounty'), 'bounty result');
+  assert((app.career.lastReport?.roomNote ?? '').length > 8, 'room carried into the result');
+  assert(app.career.room && !app.career.roomSpent, 'next room');
   const circuit = runCircuitScrim(app.career, 'iron');
   assert(!circuit.error, circuit.error ?? 'circuit');
   assert(circuit.career.intel.iron, 'scrim intel');
@@ -145,6 +171,7 @@ function run(): void {
   assert(!rosterIds(you).includes(wanted), 'traded player still on the roster');
   assert(rosterIds(you).includes(incoming), 'incoming player missing');
   assert(new Set(rosterIds(you)).size === 6, 'trade duplicated a player');
+  assert(Object.keys(traded.career.ties).some((key) => key.includes(incoming)), 'newcomer ties');
   app.career = traded.career;
   let guard = 0;
   let seasons = 0;

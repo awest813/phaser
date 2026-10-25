@@ -84,7 +84,7 @@ export function bestChampFor(career: Career, playerId: string, blocked: Set<stri
     if (blocked.has(champion.id)) continue;
     const mastery = player.mastery[champion.id] ?? 8;
     const meta = champion.base + (career.patch[champion.id] ?? 0);
-    const score = mastery * 0.9 + meta * 0.35 + (player.role === champion.role ? 14 : 0);
+    const score = mastery * 0.9 + meta * 0.35 + (player.role === champion.role ? 14 : 0) + (player.study === champion.id ? 8 : 0);
     if (score > bestScore) {
       bestScore = score;
       best = champion.id;
@@ -181,6 +181,7 @@ export function teamPower(
       Math.max(0, player.fatigue - 18) * 0.16;
     if (player.role !== champion.role) rating *= 0.84;
     if (player.trait === 'onetrick') rating += champId === bestMasteryId(player) ? 5 : -4;
+    if (champId === player.study) rating += 2;
     if (player.trait === 'meta') {
       if (patch >= 3) rating += 4;
       if (patch <= -3) rating -= 3;
@@ -214,6 +215,13 @@ export function teamPower(
   if (home) total += 3;
   total += facilityAt(team.facility).prep;
   if (draft.playerIds.some((id) => career.players[id].trait === 'leader')) total += 3;
+  for (let i = 0; i < draft.playerIds.length; i++) {
+    for (let j = i + 1; j < draft.playerIds.length; j++) {
+      const bond = bondBetween(career, draft.playerIds[i], draft.playerIds[j]);
+      if (bond >= 2) total += 4;
+      if (bond <= -2) total -= 5;
+    }
+  }
   const streak = career.streak ?? 0;
   if (team.player && streak >= 3) total += streak >= 5 ? 8 : 4;
   if (team.player && streak <= -3) total -= 4;
@@ -244,6 +252,18 @@ export function coachNotes(career: Career, opponentStrategy: Strategy): string[]
     if (mastery < 40) notes.push(`${player.nick} is still learning ${champion?.name ?? 'that champion'}.`);
     if (teamById(career, career.playerTeamId).dev.includes(id)) notes.push(`${player.nick} is a development call-up.`);
   }
+  const promised = career.promiseId ? career.players[career.promiseId] : undefined;
+  if (promised && !lineup.playerIds.includes(promised.id)) notes.unshift(`${promised.nick} was promised this series and is not queued.`);
+  const starters = lineup.playerIds.filter(Boolean);
+  for (let i = 0; i < starters.length; i++) {
+    for (let j = i + 1; j < starters.length; j++) {
+      const bond = bondBetween(career, starters[i], starters[j]);
+      const left = career.players[starters[i]];
+      const right = career.players[starters[j]];
+      if (bond >= 2 && left && right) notes.push(`${left.nick} and ${right.nick} read each other.`);
+      if (bond <= -2 && left && right) notes.push(`${left.nick} and ${right.nick} do not want the same rift.`);
+    }
+  }
   const streak = career.streak ?? 0;
   if (streak >= 3) notes.push(`${streak} straight wins. Do not get cute.`);
   if (streak <= -3) notes.push(`Skid of ${-streak}. A clean win matters more than the perfect comp.`);
@@ -251,6 +271,12 @@ export function coachNotes(career: Career, opponentStrategy: Strategy): string[]
   else if (counters(opponentStrategy, lineup.strategy)) notes.push('Their style punishes this plan.');
   if (!notes.length) notes.push('The draft is clean. Queue it.');
   return notes.slice(0, 4);
+}
+
+function bondBetween(career: Career, a: string, b: string): number {
+  if (!a || !b || a === b) return 0;
+  const key = a < b ? `${a}|${b}` : `${b}|${a}`;
+  return career.ties?.[key] ?? 0;
 }
 
 function clock(minute: number, rng: Rng): string {

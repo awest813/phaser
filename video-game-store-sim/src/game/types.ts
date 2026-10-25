@@ -72,6 +72,8 @@ export interface Player {
   mastery: Record<string, number>;
   trait: Trait;
   injured: number;
+  study: string;
+  sat: number;
   seasonGames: number;
   seasonWins: number;
   seasonMvps: number;
@@ -159,6 +161,18 @@ export interface WeekReport {
   raceLine?: string;
   nextHook?: string;
   streakAfter?: number;
+  roomNote?: string;
+}
+
+export type RoomKind = 'share' | 'promise' | 'rest' | 'study' | 'film';
+
+export interface RoomEvent {
+  kind: RoomKind;
+  text: string;
+  ids: string[];
+  champId?: string;
+  a: { label: string; detail: string };
+  b: { label: string; detail: string };
 }
 
 export type BountyId = 'win' | 'prospect' | 'fresh' | 'mains' | 'rival';
@@ -308,6 +322,11 @@ export interface Career {
   bounty: Bounty | null;
   rivalId: string;
   rivalHeat: number;
+  ties: Record<string, number>;
+  promiseId: string | null;
+  room: RoomEvent | null;
+  roomSpent: boolean;
+  roomEcho: string;
 }
 
 export interface AppState {
@@ -359,4 +378,7 @@ export type Action =
   | { type: 'scrim-house' }
   | { type: 'scrim-circuit'; opponentId: string }
   | { type: 'trade-accept'; id: number }
-  | { type: 'trade-decline'; id: number };
+  | { type: 'trade-decline'; id: number }
+  | { type: 'room'; side: 'a' | 'b' }
+  | { type: 'study'; id: string; champ: string }
+  | { type: 'promise'; id: string };

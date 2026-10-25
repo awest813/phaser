@@ -15,7 +15,7 @@ import {
   teamById
 } from './match.ts';
 import { Rng } from './rng.ts';
-import { bestMasteryId, blankSeasonStats, demand, overall } from './roster.ts';
+import { bestMasteryId, blankSeasonStats, demand, overall, roleChamps } from './roster.ts';
 import { doubleRoundRobin, singleRoundRobin } from './schedule.ts';
 import type {
   Award,
@@ -31,6 +31,7 @@ import type {
   Player,
   PlayoffState,
   Role,
+  RoomEvent,
   ScrimReport,
   SeriesState,
   Strategy,
@@ -202,8 +203,11 @@ function makeGeneratedPlayer(rng: Rng, id: string, role: Role, ovr: number, pote
     mastery: assignMastery(rng, role, ovr),
     trait: rng.pick(TRAITS),
     injured: 0,
+    study: '',
+    sat: 0,
     ...blankSeasonStats()
   };
+  player.study = bestMasteryId(player) || 'brynhild';
   player.salary = demand(player);
   return player;
 }
@@ -254,8 +258,12 @@ function dealPortraits(): string[][] {
   return teams;
 }
 
-function handPlayer(partial: Omit<Player, 'seasonGames' | 'seasonWins' | 'seasonMvps' | 'careerGames' | 'careerMvps'>): Player {
-  return { ...partial, ...blankSeasonStats() };
+function handPlayer(
+  partial: Omit<Player, 'seasonGames' | 'seasonWins' | 'seasonMvps' | 'careerGames' | 'careerMvps' | 'study' | 'sat'>
+): Player {
+  const player: Player = { ...partial, ...blankSeasonStats(), study: '', sat: 0 };
+  player.study = bestMasteryId(player) || 'brynhild';
+  return player;
 }
 
 function favoriteChamp(career: Career, team: Team): string {
@@ -706,11 +714,18 @@ export function createCareer(input: OrgInput, seed: number): Career {
     streak: 0,
     bounty: null,
     rivalId: 'iron',
-    rivalHeat: 28
+    rivalHeat: 28,
+    ties: {},
+    promiseId: null,
+    room: null,
+    roomSpent: false,
+    roomEcho: ''
   };
   const notes = rollPatch(career, rng);
   refreshOffers(career, rng, true);
   career.bounty = rollBounty(career, rng);
+  seedTies(career, rng);
+  career.room = rollRoom(career, rng);
   career.rngState = rng.state;
   pushNews(career, `${input.name} open a season in a garage in ${input.city}. The Pantheon Circuit does not care yet.`);
   pushNews(career, `Opening patch ${career.patchName}: ${notes.slice(0, 2).join(' ') || 'The rift barely moves.'}`);
@@ -862,6 +877,7 @@ function trainAll(career: Career, rng: Rng, played: Set<string>): void {
       } else if (team.training === 'champion') {
         const gain = (team.main.includes(id) ? 3 : 2) * facility.training * (onDev ? facility.dev : 1);
         bumpMastery(player, team.trainingChamp, Math.max(1, Math.round(gain)));
+        if (team.trainingChamp === player.study) bumpMastery(player, team.trainingChamp, 1);
         player.fatigue += 3;
       }
       player.fatigue = clamp(player.fatigue - 14 * facility.recovery, 0, 100);
@@ -886,6 +902,7 @@ function applyOutcome(career: Career, teamId: string, draft: Draft, won: boolean
       player.morale = clamp(player.morale + (won ? 5 : -3), 5, 100);
       const champId = draft.champs[id];
       if (champId) bumpMastery(player, champId, team.dev.includes(id) ? 2 : 1);
+      if (champId && champId === player.study) bumpMastery(player, champId, 2);
       if (id === mvpId) {
         player.seasonMvps += 1;
         player.careerMvps += 1;
@@ -980,6 +997,302 @@ function healStartedInjuries(career: Career, started: Set<string>): void {
   for (const id of started) {
     const player = career.players[id];
     if (player) player.injured = Math.max(0, player.injured - 1);
+  }
+}
+
+function tieKey(a: string, b: string): string {
+  return a < b ? `${a}|${b}` : `${b}|${a}`;
+}
+
+export function readTie(career: Career, a: string, b: string): number {
+  if (!a || !b || a === b) return 0;
+  return career.ties?.[tieKey(a, b)] ?? 0;
+}
+
+function shiftTie(career: Career, a: string, b: string, delta: number): void {
+  if (!a || !b || a === b || !delta) return;
+  const key = tieKey(a, b);
+  const value = clamp((career.ties[key] ?? 0) + delta, -3, 3);
+  if (value === 0) delete career.ties[key];
+  else career.ties[key] = value;
+}
+
+function clearTies(career: Career, id: string): void {
+  for (const key of Object.keys(career.ties ?? {})) {
+    if (key.split('|').includes(id)) delete career.ties[key];
+  }
+  if (career.promiseId === id) career.promiseId = null;
+}
+
+function seedTies(career: Career, rng: Rng): void {
+  career.ties = {};
+  shiftTie(career, 'mina', 'veil', 2);
+  shiftTie(career, 'kite', 'boom', -2);
+  shiftTie(career, 'nyx', 'veil', 2);
+  shiftTie(career, 'wolf', 'mina', 1);
+  shiftTie(career, 'kite', 'mina', 1);
+  for (const team of career.orgs) {
+    if (team.player) continue;
+    const ids = rng.shuffle(rosterIds(team));
+    if (ids.length >= 2) shiftTie(career, ids[0], ids[1], 2);
+    if (ids.length >= 4) shiftTie(career, ids[2], ids[3], -2);
+  }
+}
+
+function retieNewcomer(career: Career, team: Team, id: string, rng: Rng): void {
+  clearTies(career, id);
+  const mates = rosterIds(team).filter((other) => other !== id);
+  if (!mates.length) return;
+  const friend = rng.pick(mates);
+  shiftTie(career, id, friend, 1);
+  const cold = mates.find((other) => other !== friend);
+  if (cold) shiftTie(career, id, cold, -1);
+}
+
+function shareRoom(career: Career, rng: Rng, roster: Player[]): RoomEvent {
+  const ids = roster.map((player) => player.id);
+  let leftId = ids[0];
+  let rightId = ids[1] ?? ids[0];
+  let found = false;
+  for (let i = 0; i < ids.length; i++) {
+    for (let j = i + 1; j < ids.length; j++) {
+      if (readTie(career, ids[i], ids[j]) <= -1) {
+        leftId = ids[i];
+        rightId = ids[j];
+        found = true;
+      }
+    }
+  }
+  if (!found) {
+    const shuffled = rng.shuffle(ids);
+    leftId = shuffled[0];
+    rightId = shuffled[1] ?? shuffled[0];
+  }
+  const left = career.players[leftId];
+  const right = career.players[rightId];
+  return {
+    kind: 'share',
+    ids: [leftId, rightId],
+    text: `${left.nick} and ${right.nick} both want the same practice block. The one you pass over will hear it.`,
+    a: { label: `Side with ${left.nick}`, detail: `${left.nick} rises. ${right.nick} takes it personally.` },
+    b: { label: 'Split the block', detail: 'Both stay. Both tire a little. The friction eases.' }
+  };
+}
+
+function promiseRoom(career: Career, player: Player): RoomEvent {
+  const team = playerTeam(career);
+  const from = player.sat >= 2 ? 'Two weeks on the bench made it a demand.' : team.dev.includes(player.id) ? 'The ask comes from development.' : 'They want the rift, not the comms chair.';
+  return {
+    kind: 'promise',
+    ids: [player.id],
+    text: `${player.nick} wants this series. ${from}`,
+    a: { label: `Promise ${player.nick} the start`, detail: 'Queue them or the room hears the break.' },
+    b: { label: 'Keep the board yours', detail: `${player.nick} loses the argument and a little trust.` }
+  };
+}
+
+function restRoom(player: Player): RoomEvent {
+  return {
+    kind: 'rest',
+    ids: [player.id],
+    text: `${player.nick} is at ${Math.round(player.fatigue)} fatigue. Another hard series and the wrist goes.`,
+    a: { label: `Give ${player.nick} the block off`, detail: 'Fatigue drops. A start promise on top of a rest would be noise.' },
+    b: { label: 'Push through', detail: 'Morale holds. The fatigue comes into the match.' }
+  };
+}
+
+function studyRoom(career: Career, rng: Rng, roster: Player[]): RoomEvent {
+  const player = rng.pick(roster);
+  const options = roleChamps(player.role).filter((id) => id !== player.study);
+  const champId = [...options].sort((a, b) => (career.patch[b] ?? 0) - (career.patch[a] ?? 0))[0] ?? player.study;
+  return {
+    kind: 'study',
+    ids: [player.id],
+    champId,
+    text: `${player.nick} wants the week on ${champName(champId)}. That champion becomes what they queue until you change it.`,
+    a: { label: `Let ${player.nick} study ${champName(champId)}`, detail: 'Mastery jumps now. Auto draft leans on it.' },
+    b: { label: 'Stay on the current pool', detail: `${player.nick} keeps ${champName(player.study)} and loses the argument.` }
+  };
+}
+
+function filmRoom(player: Player): RoomEvent {
+  return {
+    kind: 'film',
+    ids: [player.id],
+    text: `${player.nick} wants to stream the garage. The router can take it. The neighbors already know the schedule.`,
+    a: { label: 'Open the stream', detail: 'Fans show up. The extra hour costs fatigue.' },
+    b: { label: 'Keep the house closed', detail: 'Chemistry over content. No extra eyes this week.' }
+  };
+}
+
+function rollRoom(career: Career, rng: Rng): RoomEvent | null {
+  if (career.stage.kind === 'offseason' || !findPlayerFixture(career)) return null;
+  const team = playerTeam(career);
+  const roster = rosterIds(team).map((id) => career.players[id]).filter(Boolean);
+  if (roster.length < 2) return null;
+  const sat = roster.filter((player) => team.main.includes(player.id) && player.sat >= 2 && player.injured <= 0);
+  const tired = [...roster].filter((player) => player.injured <= 0).sort((a, b) => b.fatigue - a.fatigue);
+  const dev = roster.filter((player) => team.dev.includes(player.id) && player.injured <= 0);
+  if (sat[0] && rng.chance(0.75)) return promiseRoom(career, sat[0]);
+  if (tired[0] && tired[0].fatigue >= 40 && rng.chance(0.6)) return restRoom(tired[0]);
+  const kind = rng.pick(['share', 'promise', 'study', 'film'] as const);
+  if (kind === 'share') return shareRoom(career, rng, roster);
+  if (kind === 'promise') return promiseRoom(career, rng.pick(dev.length ? dev : roster));
+  if (kind === 'study') return studyRoom(career, rng, roster);
+  return filmRoom(rng.pick(roster));
+}
+
+function applyRoom(career: Career, side: 'a' | 'b'): void {
+  const room = career.room;
+  if (!room) return;
+  const team = playerTeam(career);
+  const first = career.players[room.ids[0]];
+  const second = room.ids[1] ? career.players[room.ids[1]] : undefined;
+  if (room.kind === 'share' && first && second) {
+    if (side === 'a') {
+      first.morale = clamp(first.morale + 6, 5, 100);
+      second.morale = clamp(second.morale - 5, 5, 100);
+      shiftTie(career, first.id, second.id, -1);
+      career.roomEcho = `${first.nick} got the block. ${second.nick} will remember it.`;
+    } else {
+      first.morale = clamp(first.morale + 3, 5, 100);
+      second.morale = clamp(second.morale + 3, 5, 100);
+      first.fatigue = clamp(first.fatigue + 3, 0, 100);
+      second.fatigue = clamp(second.fatigue + 3, 0, 100);
+      shiftTie(career, first.id, second.id, 1);
+      career.roomEcho = `${first.nick} and ${second.nick} split the block. The edge between them softens.`;
+    }
+  } else if (room.kind === 'promise' && first) {
+    if (side === 'a') {
+      if (career.promiseId && career.promiseId !== first.id) {
+        const prev = career.players[career.promiseId];
+        if (prev) prev.morale = clamp(prev.morale - 4, 5, 100);
+      }
+      career.promiseId = first.id;
+      first.morale = clamp(first.morale + 3, 5, 100);
+      career.roomEcho = `${first.nick} has this series if you queue them.`;
+    } else {
+      first.morale = clamp(first.morale - 4, 5, 100);
+      const leader = rosterIds(team).find((id) => career.players[id].trait === 'leader' && id !== first.id);
+      if (leader) shiftTie(career, first.id, leader, -1);
+      career.roomEcho = `${first.nick} asked for the series and heard no.`;
+    }
+  } else if (room.kind === 'rest' && first) {
+    if (side === 'a') {
+      first.fatigue = clamp(first.fatigue - 16, 0, 100);
+      first.morale = clamp(first.morale + 2, 5, 100);
+      if (career.promiseId === first.id) career.promiseId = null;
+      career.roomEcho = `${first.nick} spends the block off the PC.`;
+    } else {
+      first.fatigue = clamp(first.fatigue + 5, 0, 100);
+      first.morale = clamp(first.morale + 3, 5, 100);
+      career.roomEcho = `${first.nick} pushes through the fatigue.`;
+    }
+  } else if (room.kind === 'study' && first && room.champId) {
+    if (side === 'a') {
+      first.study = room.champId;
+      bumpMastery(first, room.champId, 4);
+      first.morale = clamp(first.morale + 3, 5, 100);
+      career.roomEcho = `${first.nick} spends the week on ${champName(room.champId)}.`;
+    } else {
+      first.morale = clamp(first.morale - 3, 5, 100);
+      first.form = clamp(first.form - 1, -10, 10);
+      career.roomEcho = `${first.nick} stays on ${champName(first.study)}.`;
+    }
+  } else if (room.kind === 'film' && first) {
+    if (side === 'a') {
+      team.fans += 60;
+      first.fatigue = clamp(first.fatigue + 8, 0, 100);
+      first.morale = clamp(first.morale + 4, 5, 100);
+      career.roomEcho = `${first.nick} streams the garage. A few more people know the tag.`;
+    } else {
+      team.chemistry = clamp(team.chemistry + 2, 15, 100);
+      first.morale = clamp(first.morale + 2, 5, 100);
+      career.roomEcho = 'The stream stays off. The house gets the hour.';
+    }
+  }
+  if (career.roomEcho) pushNews(career, career.roomEcho);
+}
+
+export function chooseRoom(career: Career, side: 'a' | 'b'): { career: Career; error?: string } {
+  if (!career.room) return { career, error: 'The room is quiet.' };
+  if (career.roomSpent) return { career, error: 'That conversation already happened.' };
+  const next = structuredClone(career);
+  applyRoom(next, side);
+  next.roomSpent = true;
+  return { career: next };
+}
+
+export function setPromise(career: Career, id: string): { career: Career; error?: string } {
+  if (career.stage.kind === 'offseason') return { career, error: 'Promises wait until there is a match.' };
+  const next = structuredClone(career);
+  const team = playerTeam(next);
+  if (!rosterIds(team).includes(id)) return { career: next, error: 'That player is not in the building.' };
+  const player = next.players[id];
+  if (player.injured > 0) return { career: next, error: `${player.nick} is hurt.` };
+  if (next.promiseId === id) {
+    next.promiseId = null;
+    player.morale = clamp(player.morale - 3, 5, 100);
+    pushNews(next, `The promise to ${player.nick} is pulled.`);
+    return { career: next };
+  }
+  if (next.promiseId && next.promiseId !== id) {
+    const prev = next.players[next.promiseId];
+    if (prev) prev.morale = clamp(prev.morale - 4, 5, 100);
+  }
+  next.promiseId = id;
+  player.morale = clamp(player.morale + 2, 5, 100);
+  pushNews(next, `${player.nick} is promised this series.`);
+  return { career: next };
+}
+
+export function setStudy(career: Career, id: string, champId: string): { career: Career; error?: string } {
+  const next = structuredClone(career);
+  const player = next.players[id];
+  const team = playerTeam(next);
+  if (!player || !rosterIds(team).includes(id)) return { career: next, error: 'That player is not on the roster.' };
+  if (!roleChamps(player.role).includes(champId)) return { career: next, error: 'Study stays inside the role.' };
+  player.study = champId;
+  return { career: next };
+}
+
+function settleMinutes(career: Career, queued: string[], won: boolean, report: WeekReport, rng: Rng): void {
+  const team = playerTeam(career);
+  const started = new Set(queued);
+  if (career.promiseId) {
+    const player = career.players[career.promiseId];
+    if (player && rosterIds(team).includes(player.id) && player.injured <= 0) {
+      if (started.has(player.id)) {
+        player.morale = clamp(player.morale + 5, 5, 100);
+        player.form = clamp(player.form + 1, -10, 10);
+        report.notes.push(`${player.nick} was promised the series, and you kept it.`);
+      } else {
+        player.morale = clamp(player.morale - 12, 5, 100);
+        team.chemistry = clamp(team.chemistry - 4, 15, 100);
+        const leader = rosterIds(team).find((id) => career.players[id].trait === 'leader' && id !== player.id);
+        if (leader) shiftTie(career, player.id, leader, -1);
+        report.notes.push(`${player.nick} was promised the series and sat. The room heard it.`);
+      }
+    }
+    career.promiseId = null;
+  }
+  for (const id of rosterIds(team)) {
+    const player = career.players[id];
+    if (team.main.includes(id) && player.injured <= 0 && !started.has(id)) player.sat += 1;
+    else player.sat = 0;
+    if (player.sat === 2) {
+      player.morale = clamp(player.morale - 6, 5, 100);
+      report.notes.push(`${player.nick} has sat two weeks running. Minutes are the conversation now.`);
+    }
+    if (player.sat >= 3) team.chemistry = clamp(team.chemistry - 1, 15, 100);
+  }
+  const live = queued.filter((id) => career.players[id]);
+  for (let i = 0; i < live.length; i++) {
+    for (let j = i + 1; j < live.length; j++) {
+      const current = readTie(career, live[i], live[j]);
+      if (won && current < 3 && rng.chance(0.35)) shiftTie(career, live[i], live[j], 1);
+      if (!won && current > -3 && current < 0 && rng.chance(0.35)) shiftTie(career, live[i], live[j], -1);
+    }
   }
 }
 
@@ -1123,6 +1436,13 @@ export function playCurrentWeek(career: Career): Career {
   const also: string[] = [];
   let playerPrize = 0;
   let playerPlayed = false;
+  if (next.room && !next.roomSpent) {
+    const ignored = next.players[next.room.ids[0]];
+    if (ignored) ignored.morale = clamp(ignored.morale - 4, 5, 100);
+    next.roomEcho = ignored ? `${ignored.nick} wanted a word before the match. You walked past them.` : 'The room was left alone.';
+    next.roomSpent = true;
+    pushNews(next, next.roomEcho);
+  }
 
   for (const fixture of fixtureList) {
     const isYou = fixture.homeId === you || fixture.awayId === you;
@@ -1169,6 +1489,7 @@ export function playCurrentWeek(career: Career): Career {
     }
   }
   if (also.length) report.notes.push(`Also this week: ${also.join(', ')}.`);
+  if (playerPlayed) settleMinutes(next, queued, report.won === true, report, rng);
   if (next.lastScrim && next.scrimDone) report.notes.unshift(next.lastScrim.note);
   next.offers = [];
   healStartedInjuries(next, startedHurt);
@@ -1235,6 +1556,10 @@ export function playCurrentWeek(career: Career): Career {
 
   advance(next, rng, report);
   next.scrimDone = false;
+  if (next.roomEcho) report.roomNote = next.roomEcho;
+  next.roomEcho = '';
+  next.room = next.stage.kind === 'offseason' ? null : rollRoom(next, rng);
+  next.roomSpent = false;
   next.bounty = next.stage.kind === 'offseason' ? null : rollBounty(next, rng);
   report.nextHook = nextHook(next);
   if (next.stage.kind !== 'offseason') refreshOffers(next, rng, false);
@@ -1654,6 +1979,7 @@ export function releasePlayer(career: Career, id: string): { career: Career; err
   if (cost) book(next, 'Offseason', `Severance for ${player.nick}`, -cost);
   team.main = team.main.filter((entry) => entry !== id);
   team.dev = team.dev.filter((entry) => entry !== id);
+  clearTies(next, id);
   if (!next.freeAgents.includes(id)) next.freeAgents.push(id);
   team.chemistry = clamp(team.chemistry - 6, 15, 100);
   next.lineup.playerIds = next.lineup.playerIds.filter((entry) => entry !== id);
@@ -1751,6 +2077,7 @@ export function beginNextSeason(career: Career): { career: Career; error?: strin
     next.players[id].seasonGames = 0;
     next.players[id].seasonWins = 0;
     next.players[id].seasonMvps = 0;
+    next.players[id].sat = 0;
   }
   next.freeAgents = [];
   next.scrimDone = false;
@@ -1762,7 +2089,11 @@ export function beginNextSeason(career: Career): { career: Career; error?: strin
   for (const champion of CHAMPIONS) next.patch[champion.id] = 0;
   const rng = new Rng(next.rngState);
   const notes = rollPatch(next, rng);
+  next.promiseId = null;
+  next.roomEcho = '';
   next.bounty = rollBounty(next, rng);
+  next.room = rollRoom(next, rng);
+  next.roomSpent = false;
   next.rngState = rng.state;
   pushNews(next, `Season ${next.year} opens. Patch ${next.patchName}: ${notes[0] ?? 'A quiet rift.'}`);
   const filled = autofillLineup(next);
@@ -1814,6 +2145,15 @@ export function normalizeCareer(career: Career): Career {
   career.bounty ??= null;
   career.rivalId ??= 'iron';
   career.rivalHeat ??= 28;
+  career.ties ??= {};
+  career.promiseId ??= null;
+  career.room ??= null;
+  career.roomSpent ??= false;
+  career.roomEcho ??= '';
+  for (const player of Object.values(career.players)) {
+    player.sat ??= 0;
+    if (!player.study) player.study = bestMasteryId(player) || 'brynhild';
+  }
   for (const season of career.history) season.mvp ??= 'Unawarded';
   return career;
 }
@@ -2003,6 +2343,10 @@ export function acceptTrade(career: Career, offerId: number): { career: Career; 
   them.chemistry = clamp(them.chemistry - 4, 15, 100);
   next.lineup.playerIds = next.lineup.playerIds.filter((id) => id !== live.theyWant);
   delete next.lineup.champs[live.theyWant];
+  const dealRng = new Rng(next.rngState);
+  retieNewcomer(next, you, incoming.id, dealRng);
+  retieNewcomer(next, them, outgoing.id, dealRng);
+  next.rngState = dealRng.state;
   next.offers = [];
   pushNews(next, `${outgoing.nick} goes to ${them.name}. ${incoming.nick} joins ${you.tag}.`);
   return { career: next };

@@ -5,6 +5,7 @@ import {
   playerStanding,
   playerTeam,
   raceLine,
+  readTie,
   rankGroup,
   rankTeams,
   rosterIds,
@@ -26,7 +27,7 @@ import {
   opponentOf,
   teamPower
 } from '../game/match.ts';
-import { TRAIT_COPY, bestMasteryId, demand, masteryLabel, overall } from '../game/roster.ts';
+import { TRAIT_COPY, bestMasteryId, demand, masteryLabel, overall, roleChamps } from '../game/roster.ts';
 import type { AppState, Career, Champion, MatchKind, Player, Strategy, Team } from '../game/types.ts';
 
 const TRAINING: { id: Career['orgs'][number]['training']; name: string; text: string }[] = [
@@ -220,6 +221,22 @@ function body(app: AppState): string {
   }
 }
 
+function roomBlock(career: Career): string {
+  if (career.stage.kind === 'offseason' || !career.room) return '';
+  if (career.roomSpent) {
+    return `<article class="panel"><h2>The room</h2><p class="scrim-note">${esc(career.roomEcho || 'The conversation is settled for this week.')}</p></article>`;
+  }
+  const room = career.room;
+  return `<article class="panel">
+    <h2>The room</h2>
+    <p>${esc(room.text)}</p>
+    <div class="choice room-choice">
+      <button type="button" data-act="room" data-side="a"><strong>${esc(room.a.label)}</strong><span>${esc(room.a.detail)}</span></button>
+      <button type="button" data-act="room" data-side="b"><strong>${esc(room.b.label)}</strong><span>${esc(room.b.detail)}</span></button>
+    </div>
+  </article>`;
+}
+
 function practiceBlock(career: Career): string {
   if (career.stage.kind === 'offseason' || !describeWeek(career)) return '';
   if (career.scrimDone && career.lastScrim) {
@@ -269,6 +286,7 @@ function officeScreen(app: AppState): string {
   const foe = fixture ? teamById(career, opponentOf(fixture, team.id)) : null;
   const practice = practiceBlock(career);
   const trade = tradeBlock(career);
+  const room = roomBlock(career);
   return `<section class="desk">
     ${career.patchUnread ? `<article class="banner span-2"><div><p class="kicker">Patch ${esc(career.patchName)}</p><p>${career.patchNotes.map((line) => esc(line)).join(' ') || 'A quiet rift.'}</p></div><button class="btn" type="button" data-act="dismiss-patch">Noted</button></article>` : ''}
     <article class="matchup">
@@ -292,7 +310,7 @@ function officeScreen(app: AppState): string {
         <div><dt>Payroll</dt><dd>${money(payroll(career))}</dd></div>
       </dl>
     </article>
-    ${practice || trade ? `<div class="desk-rail">${practice}${trade}</div>` : ''}
+    ${room || practice || trade ? `<div class="desk-rail">${room}${practice}${trade}</div>` : ''}
     ${awardBlock(career)}
     <div class="split span-2">
       <article class="panel">
@@ -306,7 +324,7 @@ function officeScreen(app: AppState): string {
     </div>
     <article class="panel how span-2">
       <h2>How a week works</h2>
-      <p>Clear the bounty, then queue the match. A win streak starts paying fans at three and adds series power at three and five. The practice block is one house set or one circuit scrim. Trade calls expire when the match is queued.</p>
+      <p>Answer the room, clear the bounty, then queue the match. A promised start has to be kept. Players grow the champion they are studying, and two players who cannot stand each other make the series harder. Trade calls expire when the match is queued.</p>
       ${week ? '' : ''}
     </article>
     ${career.history.length ? `<article class="panel span-2"><h2>Previous seasons</h2><ul class="news">${career.history.map((season) => `<li>Season ${season.year}: ${season.wins}-${season.losses}, Cup ${esc(season.cup)}, Playoffs ${esc(season.playoff)}, MVP ${esc(season.mvp)}</li>`).join('')}</ul></article>` : ''}
@@ -343,6 +361,7 @@ function playerCard(career: Career, id: string, swapWith: string[]): string {
       <div class="row spread"><strong>${esc(player.nick)}</strong>${roleTag(player.role)}</div>
       <span class="muted">${esc(player.name)} · ${player.age}</span>
       <p>${esc(TRAIT_COPY[player.trait].name)} · ${esc(champName(best))} ${player.mastery[best] ?? 0}</p>
+      <p class="muted">Studying ${esc(champName(player.study || best))}${career.promiseId === id ? ' · promised the start' : ''}${player.sat >= 2 ? ' · wants minutes' : ''}</p>
       <div class="meters-mini"><span>Morale ${Math.round(player.morale)}</span>${bar(player.morale)}<span>Fatigue ${Math.round(player.fatigue)}</span>${bar(player.fatigue, 100, 'fatigue')}</div>
       <span class="muted">${player.contractStatus === 'expiring' ? 'Contract expired' : `${player.contractYears}y · ${money(player.salary)}/wk`}${player.injured ? ` · out ${player.injured}` : ''}</span>
       <div class="row wrap">${swapWith.map((other) => `<button class="btn tiny" type="button" data-act="swap" data-a="${id}" data-b="${other}">Swap ${esc(career.players[other].nick)}</button>`).join('')}</div>
@@ -373,6 +392,19 @@ function playerScreen(app: AppState): string {
         ${statLine('Macro', player.macro)}
         ${statLine('Teamwork', player.teamwork)}
         ${statLine('Clutch', player.clutch)}
+        <h2>Study</h2>
+        <p class="muted">The champion they queue in auto draft, and the one that gains extra mastery when they play it. Locked champions in the study also hit a little harder.</p>
+        <div class="row wrap">${roleChamps(player.role).map((id) => `<button type="button" class="btn tiny ${player.study === id ? 'on' : ''}" data-act="study" data-id="${player.id}" data-champ="${id}">${esc(champName(id))}</button>`).join('')}</div>
+        ${rosterIds(playerTeam(career)).includes(player.id) && career.stage.kind !== 'offseason' ? `<div class="row"><button class="btn ${career.promiseId === player.id ? 'on' : ''}" type="button" data-act="promise" data-id="${player.id}">${career.promiseId === player.id ? 'Pull the promise' : 'Promise the start'}</button></div>` : ''}
+        <h2>The room</h2>
+        <ul class="news">${rosterIds(playerTeam(career))
+          .filter((id) => id !== player.id)
+          .map((id) => {
+            const bond = readTie(career, player.id, id);
+            const word = bond >= 2 ? 'close' : bond === 1 ? 'easy' : bond === 0 ? 'neutral' : bond === -1 ? 'cool' : 'friction';
+            return `<li class="${bond > 0 ? 'streak-hot' : bond < 0 ? 'streak-cold' : ''}">${esc(career.players[id].nick)} · ${word}</li>`;
+          })
+          .join('')}</ul>
         <h2>Champion pool</h2>
         ${masteries.map(([id, value]) => `<label>${esc(champName(id))} · ${masteryLabel(value)} ${bar(value)}</label>`).join('')}
         <p class="muted">Season ${player.seasonGames} games, ${player.seasonWins} series wins, ${player.seasonMvps} MVPs. Career MVPs ${player.careerMvps}.</p>
@@ -471,6 +503,7 @@ function matchScreen(app: AppState): string {
         <h1>${esc(foe.name)}</h1>
         <p>${fixture.homeId === team.id ? 'Home' : 'Away'} on Spire Rift — one lane, Ash Path, Mirror Path, and the Worldheart pit. Series length ${fixture.series === 1 ? 'one game' : `best of ${fixture.series}`}.</p>
         ${streakCopy(career.streak ?? 0) ? `<p class="${(career.streak ?? 0) > 0 ? 'streak-hot' : 'streak-cold'}">${esc(streakCopy(career.streak ?? 0))}</p>` : ''}
+        ${career.promiseId && career.players[career.promiseId] ? `<p class="streak-hot">${esc(career.players[career.promiseId].nick)} is promised this series.</p>` : ''}
       </div>
       ${bountyLine(career)}
     </header>
@@ -567,6 +600,7 @@ function resultScreen(app: AppState): string {
       ${report.raceLine ? `<p class="hook">${esc(report.raceLine)}</p>` : ''}
       ${streakCopy(streak) ? `<p class="${streak > 0 ? 'streak-hot' : 'streak-cold'}">${esc(streakCopy(streak))}</p>` : ''}
       ${report.bountyNote ? `<p class="${report.bountyNote.startsWith('Bounty cleared') ? 'scrim-note' : 'warn'}">${esc(report.bountyNote)}</p>` : ''}
+      ${report.roomNote ? `<p>${esc(report.roomNote)}</p>` : ''}
       ${growth.length ? `<ul class="growth">${growth.map((line) => `<li><strong>${esc(line.nick)}</strong><span>${esc(line.text)}</span></li>`).join('')}</ul>` : '<p class="muted">No one jumped a number this week. The next block of training is where that changes.</p>'}
     </article>
     ${report.notes.map((line) => `<p>${esc(line)}</p>`).join('')}

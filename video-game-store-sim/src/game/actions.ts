@@ -1,6 +1,7 @@
 import {
   acceptTrade,
   beginNextSeason,
+  chooseRoom,
   createCareer,
   declineTrade,
   lineupProblems,
@@ -9,6 +10,8 @@ import {
   resignPlayer,
   runCircuitScrim,
   runHouseScrim,
+  setPromise,
+  setStudy,
   setTraining,
   setTrainingChamp,
   signFreeAgent,
@@ -296,6 +299,28 @@ export function apply(app: AppState, action: Action): AppState {
     next.career = result.career;
     next.notice = result.error ?? 'Call declined.';
     next.screen = 'office';
+    return next;
+  }
+  if (action.type === 'room') {
+    const result = chooseRoom(career, action.side);
+    next.career = result.career;
+    next.notice = result.error ?? result.career.roomEcho;
+    next.screen = 'office';
+    return next;
+  }
+  if (action.type === 'study') {
+    const result = setStudy(career, action.id, action.champ);
+    next.career = result.career;
+    const player = result.career.players[action.id];
+    next.notice = result.error ?? (player ? `${player.nick} is studying that champion.` : 'Study set.');
+    next.screen = 'player';
+    return next;
+  }
+  if (action.type === 'promise') {
+    const result = setPromise(career, action.id);
+    next.career = result.career;
+    next.notice = result.error ?? '';
+    next.screen = 'player';
     return next;
   }
   return next;

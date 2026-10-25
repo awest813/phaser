@@ -79,6 +79,9 @@ root.addEventListener('click', (event) => {
   else if (act === 'scrim-circuit' && target.dataset.id) dispatch({ type: 'scrim-circuit', opponentId: target.dataset.id });
   else if (act === 'trade-accept' && target.dataset.id) dispatch({ type: 'trade-accept', id: Number(target.dataset.id) });
   else if (act === 'trade-decline' && target.dataset.id) dispatch({ type: 'trade-decline', id: Number(target.dataset.id) });
+  else if (act === 'room' && (target.dataset.side === 'a' || target.dataset.side === 'b')) dispatch({ type: 'room', side: target.dataset.side });
+  else if (act === 'study' && target.dataset.id && target.dataset.champ) dispatch({ type: 'study', id: target.dataset.id, champ: target.dataset.champ });
+  else if (act === 'promise' && target.dataset.id) dispatch({ type: 'promise', id: target.dataset.id });
 });
 
 root.addEventListener('input', (event) => {

@@ -238,6 +238,8 @@ tr.in td { color: var(--ok); }
 .facility-path li.now { border-color: var(--gold); background: rgba(228, 194, 122, 0.06); }
 .facility-path em { color: var(--gold); font-style: normal; }
 .how p { margin-bottom: 0; }
+.scrim-note { color: var(--ok); }
+.offer p { margin-top: 0; }
 
 @media (max-width: 980px) {
   .shell, .create, .split, .hero-card, .detail, .choice { grid-template-columns: 1fr; }

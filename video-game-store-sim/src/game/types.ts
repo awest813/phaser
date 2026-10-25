@@ -215,6 +215,35 @@ export interface SeasonArchive {
   cup: string;
   playoff: string;
   cash: number;
+  mvp: string;
+}
+
+export interface ScrimReport {
+  kind: 'house' | 'circuit';
+  opponentId?: string;
+  opponentName?: string;
+  won?: boolean;
+  scoreline?: string;
+  note: string;
+}
+
+export interface TradeOffer {
+  id: number;
+  fromTeamId: string;
+  theyGive: string;
+  theyWant: string;
+  cash: number;
+  note: string;
+}
+
+export interface Award {
+  id: 'mvp' | 'breakout';
+  title: string;
+  year: number;
+  playerId: string;
+  playerName: string;
+  teamId: string;
+  detail: string;
 }
 
 export interface Lineup {
@@ -256,10 +285,16 @@ export interface Career {
   cupResult: string;
   playoffResult: string;
   faSerial: number;
+  scrimDone: boolean;
+  lastScrim: ScrimReport | null;
+  offers: TradeOffer[];
+  offerSeq: number;
+  awards: Award[];
+  intel: Record<string, boolean>;
 }
 
 export interface AppState {
-  version: 1;
+  version: 2;
   screen: Screen;
   returnScreen: Screen;
   career: Career | null;
@@ -303,4 +338,8 @@ export type Action =
   | { type: 'sign'; id: string; side: 'main' | 'dev'; years: number }
   | { type: 'next-season' }
   | { type: 'myth-filter'; myth: 'all' | Mythology }
-  | { type: 'role-filter'; role: 'all' | Role };
+  | { type: 'role-filter'; role: 'all' | Role }
+  | { type: 'scrim-house' }
+  | { type: 'scrim-circuit'; opponentId: string }
+  | { type: 'trade-accept'; id: number }
+  | { type: 'trade-decline'; id: number };

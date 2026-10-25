@@ -1,10 +1,14 @@
 import {
+  acceptTrade,
   beginNextSeason,
   createCareer,
+  declineTrade,
   lineupProblems,
   playCurrentWeek,
   releasePlayer,
   resignPlayer,
+  runCircuitScrim,
+  runHouseScrim,
   setTraining,
   setTrainingChamp,
   signFreeAgent,
@@ -42,7 +46,7 @@ const RESERVED_TAGS = new Set(['NHL', 'KHE', 'AEG', 'SKV', 'IRN', 'MOR', 'SOL'])
 
 export function initialApp(): AppState {
   return {
-    version: 1,
+    version: 2,
     screen: 'title',
     returnScreen: 'office',
     career: null,
@@ -263,6 +267,35 @@ export function apply(app: AppState, action: Action): AppState {
     next.career = result.career;
     next.notice = result.error ?? `Season ${result.career.year} begins in the building you have.`;
     next.screen = result.error ? 'offseason' : 'office';
+    return next;
+  }
+  if (action.type === 'scrim-house') {
+    const result = runHouseScrim(career);
+    next.career = result.career;
+    next.notice = result.error ?? 'House block complete.';
+    next.screen = 'office';
+    return next;
+  }
+  if (action.type === 'scrim-circuit') {
+    const result = runCircuitScrim(career, action.opponentId);
+    next.career = result.career;
+    next.notice = result.error ?? 'Circuit scrim complete.';
+    next.screen = 'office';
+    return next;
+  }
+  if (action.type === 'trade-accept') {
+    const queued = career.lineup.playerIds.includes(career.offers.find((offer) => offer.id === action.id)?.theyWant ?? '');
+    const result = acceptTrade(career, action.id);
+    next.career = result.career;
+    next.notice = result.error ?? (queued ? 'Deal done. The match lineup needs a replacement.' : 'Deal done.');
+    next.screen = 'office';
+    return next;
+  }
+  if (action.type === 'trade-decline') {
+    const result = declineTrade(career, action.id);
+    next.career = result.career;
+    next.notice = result.error ?? 'Call declined.';
+    next.screen = 'office';
     return next;
   }
   return next;

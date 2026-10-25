@@ -1,4 +1,5 @@
 import { apply, initialApp, isTraining } from './game/actions.ts';
+import { normalizeCareer } from './game/career.ts';
 import type { Action, AppState, LeagueTab, Mythology, Role, Screen, Strategy } from './game/types.ts';
 import { render } from './ui/render.ts';
 import './style.css';
@@ -23,9 +24,10 @@ function load(): AppState | null {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as AppState;
-    if (parsed.version !== 1) return null;
-    return { ...initialApp(), ...parsed, notice: '' };
+    const parsed = JSON.parse(raw) as Omit<AppState, 'version'> & { version: number };
+    if (parsed.version !== 1 && parsed.version !== 2) return null;
+    if (parsed.career) normalizeCareer(parsed.career);
+    return { ...initialApp(), ...parsed, version: 2, notice: '' };
   } catch {
     return null;
   }
@@ -72,7 +74,11 @@ root.addEventListener('click', (event) => {
   else if (act === 'release' && target.dataset.id) dispatch({ type: 'release', id: target.dataset.id });
   else if (act === 'sign' && target.dataset.id && (target.dataset.side === 'main' || target.dataset.side === 'dev')) {
     dispatch({ type: 'sign', id: target.dataset.id, side: target.dataset.side, years: Number(target.dataset.years) });
-  } else if (act === 'next-season') dispatch({ type: 'next-season' });
+  }   else if (act === 'next-season') dispatch({ type: 'next-season' });
+  else if (act === 'scrim-house') dispatch({ type: 'scrim-house' });
+  else if (act === 'scrim-circuit' && target.dataset.id) dispatch({ type: 'scrim-circuit', opponentId: target.dataset.id });
+  else if (act === 'trade-accept' && target.dataset.id) dispatch({ type: 'trade-accept', id: Number(target.dataset.id) });
+  else if (act === 'trade-decline' && target.dataset.id) dispatch({ type: 'trade-decline', id: Number(target.dataset.id) });
 });
 
 root.addEventListener('input', (event) => {

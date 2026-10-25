@@ -1,4 +1,18 @@
-import { freshGoals, playCurrentWeek, playerPlace, playerStanding, rankTeams, rosterReady } from './game/career.ts';
+import {
+  acceptTrade,
+  forceTradeOffer,
+  freshGoals,
+  normalizeCareer,
+  playCurrentWeek,
+  playerPlace,
+  playerStanding,
+  playerTeam,
+  rankTeams,
+  rosterIds,
+  rosterReady,
+  runCircuitScrim,
+  runHouseScrim
+} from './game/career.ts';
 import { apply, initialApp } from './game/actions.ts';
 import { FACILITIES } from './game/facilities.ts';
 import { describeWeek, lineupProblems } from './game/match.ts';
@@ -83,7 +97,40 @@ function run(): void {
   assert(freshGoals(0).some((goal) => goal.id === 'hq'), 'goals');
 
   let app = apply(initialApp(), { type: 'begin' });
-  assert(app.career, 'career missing');
+  if (!app.career) throw new Error('career missing');
+  assert(app.career.offers.length === 1, 'opening trade call');
+  const bare = structuredClone(app.career);
+  delete (bare as { offers?: unknown }).offers;
+  delete (bare as { intel?: unknown }).intel;
+  delete (bare as { awards?: unknown }).awards;
+  normalizeCareer(bare);
+  assert(Array.isArray(bare.offers) && bare.intel && Array.isArray(bare.awards), 'normalize');
+  const house = runHouseScrim(app.career);
+  assert(!house.error, house.error ?? 'house');
+  assert(house.career.scrimDone, 'house scrim not marked');
+  assert(house.career.lastScrim?.kind === 'house', 'house report');
+  const blocked = runCircuitScrim(house.career, 'iron');
+  assert(blocked.error, 'second scrim should be blocked');
+  app.career = house.career;
+  app.career = autofill(app.career);
+  app.career = playCurrentWeek(app.career);
+  assert(!app.career.scrimDone, 'scrim should reset after the match');
+  const circuit = runCircuitScrim(app.career, 'iron');
+  assert(!circuit.error, circuit.error ?? 'circuit');
+  assert(circuit.career.intel.iron, 'scrim intel');
+  assert(circuit.career.lastScrim?.opponentId === 'iron', 'scrim opponent');
+  const offered = forceTradeOffer(circuit.career);
+  assert(offered.offers.length === 1, 'forced trade');
+  const wanted = offered.offers[0].theyWant;
+  const incoming = offered.offers[0].theyGive;
+  const traded = acceptTrade(offered, offered.offers[0].id);
+  assert(!traded.error, traded.error ?? 'trade');
+  const you = playerTeam(traded.career);
+  assert(you.main.length === 4 && you.dev.length === 2, 'trade roster shape');
+  assert(!rosterIds(you).includes(wanted), 'traded player still on the roster');
+  assert(rosterIds(you).includes(incoming), 'incoming player missing');
+  assert(new Set(rosterIds(you)).size === 6, 'trade duplicated a player');
+  app.career = traded.career;
   let guard = 0;
   let seasons = 0;
   while (app.career && seasons < 2 && guard < 90) {
@@ -114,6 +161,9 @@ function run(): void {
   assert(seasons === 2, `finished ${seasons} seasons in ${guard} weeks`);
   const career = app.career;
   if (!career) throw new Error('career lost');
+  assert(career.history.length === 2, 'history');
+  assert(career.history.every((season) => season.mvp.length > 3), 'season mvp missing');
+  assert(career.awards.some((award) => award.id === 'mvp'), 'awards');
   const standing = playerStanding(career);
   console.log(
     JSON.stringify(
@@ -126,6 +176,7 @@ function run(): void {
         place: playerPlace(career),
         record: `${standing.wins}-${standing.losses}`,
         history: career.history,
+        awards: career.awards,
         ovr: ['kite', 'nyx', 'mina'].map((id) => ({ id, ovr: overall(career.players[id]), age: career.players[id].age }))
       },
       null,

@@ -29,7 +29,7 @@ import { TRAIT_COPY, bestMasteryId, demand, masteryLabel, overall } from '../gam
 import type { AppState, Career, Champion, MatchKind, Player, Strategy, Team } from '../game/types.ts';
 
 const TRAINING: { id: Career['orgs'][number]['training']; name: string; text: string }[] = [
-  { id: 'synergy', name: 'Scrims', text: 'Teamwork and chemistry. The default week.' },
+  { id: 'synergy', name: 'Teamwork', text: 'Chemistry work. Lighter than a real scrim.' },
   { id: 'mechanics', name: 'Mechanics', text: 'Hands get sharper. Fatigue comes with it.' },
   { id: 'macro', name: 'VOD', text: 'Game sense. Lighter than scrims.' },
   { id: 'champion', name: 'Champ lab', text: 'Everyone practices one champion.' },
@@ -197,6 +197,44 @@ function body(app: AppState): string {
   }
 }
 
+function practiceBlock(career: Career): string {
+  if (career.stage.kind === 'offseason' || !describeWeek(career)) return '';
+  if (career.scrimDone && career.lastScrim) {
+    return `<article class="panel"><h2>Practice block</h2><p class="scrim-note">${esc(career.lastScrim.note)}</p><p class="muted">One block a week. It is spent.</p></article>`;
+  }
+  const foes = career.orgs.filter((team) => !team.player);
+  return `<article class="panel">
+    <h2>Practice block</h2>
+    <p>One block before the match. A house set raises chemistry and tires everyone. A circuit scrim pays a little, tires both lineups, and puts their habit on the whiteboard.</p>
+    <div class="row wrap">
+      <button class="btn" type="button" data-act="scrim-house">House block</button>
+      ${foes.map((team) => `<button class="btn" type="button" data-act="scrim-circuit" data-id="${team.id}">Scrim ${esc(team.tag)}</button>`).join('')}
+    </div>
+  </article>`;
+}
+
+function tradeBlock(career: Career): string {
+  if (career.stage.kind === 'offseason') return '';
+  const offer = career.offers[0];
+  if (!offer) return `<article class="panel"><h2>Trade calls</h2><p class="muted">No one is on the line this week.</p></article>`;
+  const give = career.players[offer.theyGive];
+  const want = career.players[offer.theyWant];
+  return `<article class="panel offer">
+    <h2>Trade call</h2>
+    <p>${esc(offer.note)}</p>
+    <p class="muted">${want ? `${esc(want.nick)} ${overall(want)} OVR` : ''} · ${give ? `${esc(give.nick)} ${overall(give)} OVR, pot ${give.potential}` : ''}. The call expires when you queue the match.</p>
+    <div class="row">
+      <button class="btn primary" type="button" data-act="trade-accept" data-id="${offer.id}">Accept</button>
+      <button class="btn" type="button" data-act="trade-decline" data-id="${offer.id}">Decline</button>
+    </div>
+  </article>`;
+}
+
+function awardBlock(career: Career): string {
+  if (!career.awards.length) return '';
+  return `<article class="panel"><h2>Season ${career.awards[0].year} awards</h2><ul class="news">${career.awards.map((award) => `<li>${esc(award.title)}: ${esc(award.playerName)} (${esc(teamById(career, award.teamId).tag)}) · ${esc(award.detail)}</li>`).join('')}</ul></article>`;
+}
+
 function officeScreen(app: AppState): string {
   const career = app.career;
   if (!career) return '';
@@ -225,6 +263,9 @@ function officeScreen(app: AppState): string {
         <div><dt>Payroll</dt><dd>${money(payroll(career))}</dd></div>
       </dl>
     </article>
+    ${practiceBlock(career)}
+    ${tradeBlock(career)}
+    ${awardBlock(career)}
     <div class="split">
       <article class="panel">
         <h2>Season goals</h2>
@@ -237,10 +278,10 @@ function officeScreen(app: AppState): string {
     </div>
     <article class="panel how">
       <h2>How a week works</h2>
-      <p>Set training on the roster. On match day, ban one champion, queue three players, lock their champions, and pick a plan. Development players can be called up when a starter is tired or hurt. Prize money and match day pay for the climb out of the garage.</p>
+      <p>Spend the practice block on a house set or a circuit scrim, then set training. On match day, ban one champion, queue three players, lock their champions, and pick a plan. Trade calls expire when the match is queued. Development players can be called up when a starter is tired or hurt.</p>
       ${week ? '' : ''}
     </article>
-    ${career.history.length ? `<article class="panel"><h2>Previous seasons</h2><ul class="news">${career.history.map((season) => `<li>Season ${season.year}: ${season.wins}-${season.losses}, Cup ${esc(season.cup)}, Playoffs ${esc(season.playoff)}</li>`).join('')}</ul></article>` : ''}
+    ${career.history.length ? `<article class="panel"><h2>Previous seasons</h2><ul class="news">${career.history.map((season) => `<li>Season ${season.year}: ${season.wins}-${season.losses}, Cup ${esc(season.cup)}, Playoffs ${esc(season.playoff)}, MVP ${esc(season.mvp)}</li>`).join('')}</ul></article>` : ''}
     ${app.confirmAbandon ? '<button class="btn danger" type="button" data-act="abandon">Confirm abandon career</button>' : '<button class="btn ghost tiny" type="button" data-act="ask-abandon">Abandon career</button>'}
   </section>`;
 }
@@ -406,7 +447,7 @@ function matchScreen(app: AppState): string {
         <h2>Scouting · ${esc(facilityAt(foe.facility).name)}</h2>
         <p>${esc(foe.blurb)}</p>
         <p>${foe.city} · ${foeRecord ? `${foeRecord.wins}-${foeRecord.losses}` : '0-0'} · coach's read: <strong>${esc(edge)}</strong></p>
-        ${scout >= 1 ? `<p>They like to ${esc(foe.strategy)}. A ${esc(counterStrategy(foe.strategy))} plan is the textbook answer.</p>` : '<p class="muted">Upgrade out of the garage to read their habits. Until then, trust the edge label and experiment.</p>'}
+        ${scout >= 1 || career.intel[foe.id] ? `<p>They like to ${esc(foe.strategy)}. A ${esc(counterStrategy(foe.strategy))} plan is the textbook answer.</p>${career.intel[foe.id] && scout < 1 ? '<p class="muted">You scrimmed them. The habit is no longer a guess.</p>' : ''}` : '<p class="muted">Upgrade out of the garage, or scrim them, to read their habits. Until then, trust the edge label and experiment.</p>'}
         ${scout >= 2 ? `<ul class="news">${chooseNames(career, foe).map((line) => `<li>${line}</li>`).join('')}</ul>` : ''}
         ${scout >= 3 ? `<p class="muted">Likely bans and locks update after you ban. Their ban this draft: ${esc(champName(theirBan))}.</p>` : `<p>Their ban: <strong>${esc(champName(theirBan))}</strong></p>`}
       </article>
@@ -655,6 +696,7 @@ function offseasonScreen(app: AppState): string {
   const ready = rosterReady(career);
   return `<section class="stack">
     <header class="section-head"><h1>Offseason</h1><p>Season ${career.year} finished ${playerStanding(career).wins}-${playerStanding(career).losses}. Cup: ${esc(career.cupResult)}. Playoffs: ${esc(career.playoffResult)}. Re-sign expiring deals, or cut and shop.</p></header>
+    ${awardBlock(career)}
     <div class="roster-grid">${rosterIds(team).map((id) => contractCard(career, id)).join('')}</div>
     <h2>Free agents</h2>
     <div class="roster-grid">${career.freeAgents.map((id) => freeAgentCard(career, id)).join('') || '<p>The market is empty.</p>'}</div>

@@ -15,9 +15,10 @@ import {
   teamById
 } from './match.ts';
 import { Rng } from './rng.ts';
-import { blankSeasonStats, demand, overall } from './roster.ts';
+import { bestMasteryId, blankSeasonStats, demand, overall } from './roster.ts';
 import { doubleRoundRobin, singleRoundRobin } from './schedule.ts';
 import type {
+  Award,
   Career,
   CupState,
   Draft,
@@ -29,9 +30,11 @@ import type {
   Player,
   PlayoffState,
   Role,
+  ScrimReport,
   SeriesState,
   Strategy,
   Team,
+  TradeOffer,
   Training,
   Trait,
   WeekReport
@@ -692,9 +695,16 @@ export function createCareer(input: OrgInput, seed: number): Career {
     preseasonRounds: rounds.preseason,
     cupResult: 'Not started',
     playoffResult: 'Not started',
-    faSerial: 1
+    faSerial: 1,
+    scrimDone: false,
+    lastScrim: null,
+    offers: [],
+    offerSeq: 1,
+    awards: [],
+    intel: {}
   };
   const notes = rollPatch(career, rng);
+  refreshOffers(career, rng, true);
   career.rngState = rng.state;
   pushNews(career, `${input.name} open a season in a garage in ${input.city}. The Pantheon Circuit does not care yet.`);
   pushNews(career, `Opening patch ${career.patchName}: ${notes.slice(0, 2).join(' ') || 'The rift barely moves.'}`);
@@ -1033,6 +1043,8 @@ export function playCurrentWeek(career: Career): Career {
     }
   }
   if (also.length) report.notes.push(`Also this week: ${also.join(', ')}.`);
+  if (next.lastScrim && next.scrimDone) report.notes.unshift(next.lastScrim.note);
+  next.offers = [];
   healStartedInjuries(next, startedHurt);
   trainAll(next, rng, played);
 
@@ -1071,6 +1083,8 @@ export function playCurrentWeek(career: Career): Career {
   }
 
   advance(next, rng, report);
+  next.scrimDone = false;
+  if (next.stage.kind !== 'offseason') refreshOffers(next, rng, false);
   report.cashDelta = yours.cash - cashBefore;
   report.fansDelta = yours.fans - fansBefore;
   next.lastReport = report;
@@ -1401,6 +1415,9 @@ function startSecondHalf(career: Career, rng: Rng, report: WeekReport): void {
 
 function enterOffseason(career: Career, rng: Rng): void {
   career.stage = { kind: 'offseason' };
+  career.offers = [];
+  career.scrimDone = false;
+  if (!career.awards.length || career.awards[0]?.year !== career.year) crownAwards(career);
   if (career.contractsProcessed) return;
   for (const team of career.orgs) {
     for (const id of rosterIds(team)) {
@@ -1547,13 +1564,15 @@ export function beginNextSeason(career: Career): { career: Career; error?: strin
   const next = structuredClone(career);
   const team = playerTeam(next);
   const standing = playerStanding(next);
+  const mvp = next.awards.find((award) => award.id === 'mvp' && award.year === next.year);
   next.history.unshift({
     year: next.year,
     wins: standing.wins,
     losses: standing.losses,
     cup: next.cupResult,
     playoff: next.playoffResult,
-    cash: team.cash
+    cash: team.cash,
+    mvp: mvp ? `${mvp.playerName} (${teamById(next, mvp.teamId).tag})` : 'Unawarded'
   });
   next.year += 1;
   next.results = [];
@@ -1581,6 +1600,10 @@ export function beginNextSeason(career: Career): { career: Career; error?: strin
     next.players[id].seasonMvps = 0;
   }
   next.freeAgents = [];
+  next.scrimDone = false;
+  next.lastScrim = null;
+  next.offers = [];
+  next.intel = {};
   for (const champion of CHAMPIONS) next.patch[champion.id] = 0;
   const rng = new Rng(next.rngState);
   const notes = rollPatch(next, rng);
@@ -1622,6 +1645,269 @@ export function setTrainingChamp(career: Career, champId: string): Career {
   const next = structuredClone(career);
   if (CHAMPIONS.some((champion) => champion.id === champId)) playerTeam(next).trainingChamp = champId;
   return next;
+}
+
+export function normalizeCareer(career: Career): Career {
+  career.scrimDone ??= false;
+  career.lastScrim ??= null;
+  career.offers ??= [];
+  career.offerSeq ??= 1;
+  career.awards ??= [];
+  career.intel ??= {};
+  for (const season of career.history) season.mvp ??= 'Unawarded';
+  return career;
+}
+
+function weekOpen(career: Career): string | null {
+  if (career.stage.kind === 'offseason') return 'The building is dark until next season.';
+  if (!describeWeek(career)) return 'There is no match to practice for.';
+  if (career.scrimDone) return 'The practice block is already spent this week.';
+  return null;
+}
+
+function finishScrim(career: Career, rng: Rng, report: ScrimReport): Career {
+  career.scrimDone = true;
+  career.lastScrim = report;
+  career.rngState = rng.state;
+  pushNews(career, report.note);
+  return career;
+}
+
+export function runHouseScrim(career: Career): { career: Career; error?: string } {
+  const blocked = weekOpen(career);
+  if (blocked) return { career, error: blocked };
+  const next = structuredClone(career);
+  const team = playerTeam(next);
+  const healthy = rosterIds(team).filter((id) => next.players[id].injured <= 0);
+  if (healthy.length < 4) return { career, error: 'The house block needs four healthy players.' };
+  const starters = chooseStarterIds(next, team).filter((id) => healthy.includes(id));
+  const prospects = healthy.filter((id) => !starters.includes(id));
+  if (starters.length < 3 || prospects.length < 1) return { career, error: 'Not enough healthy players to split the block.' };
+  const facility = facilityAt(team.facility);
+  const rng = new Rng(next.rngState);
+  const fatigue = Math.max(4, 9 - Math.round(facility.recovery * 3));
+  for (const id of healthy) {
+    const player = next.players[id];
+    player.fatigue = clamp(player.fatigue + fatigue, 0, 100);
+    player.form = clamp(player.form + 0.6, -10, 10);
+    player.morale = clamp(player.morale + 1, 5, 100);
+  }
+  for (const id of prospects) {
+    if (!team.dev.includes(id)) continue;
+    const player = next.players[id];
+    bumpMastery(player, bestMasteryId(player), facility.dev >= 1 ? 2 : 1);
+    tryGain(rng, player, player.role === 'slayer' ? 'mechanics' : 'macro', 0.35 * facility.dev);
+  }
+  team.chemistry = clamp(team.chemistry + 2 + (facility.prep >= 5 ? 1 : 0), 15, 100);
+  const names = (ids: string[]) => ids.map((id) => next.players[id].nick).join(', ');
+  const note = `House block: ${names(starters)} ran sets against ${names(prospects)}. Chemistry is up, and so is the fatigue.`;
+  return { career: finishScrim(next, rng, { kind: 'house', note }) };
+}
+
+export function runCircuitScrim(career: Career, opponentId: string): { career: Career; error?: string } {
+  const blocked = weekOpen(career);
+  if (blocked) return { career, error: blocked };
+  const foe = career.orgs.find((team) => team.id === opponentId && !team.player);
+  if (!foe) return { career, error: 'Pick another organization to scrim.' };
+  const next = structuredClone(career);
+  const team = playerTeam(next);
+  const yoursHealthy = rosterIds(team).filter((id) => next.players[id].injured <= 0);
+  if (yoursHealthy.length < 3) return { career, error: 'You need three healthy players to scrim.' };
+  const rng = new Rng(next.rngState);
+  const useLineup = lineupProblems(next).length === 0;
+  const yours: Draft = useLineup
+    ? { playerIds: [...next.lineup.playerIds], champs: { ...next.lineup.champs }, strategy: next.lineup.strategy }
+    : buildDraft(next, team.id, new Set(), rng);
+  const banned = new Set<string>();
+  if (useLineup && next.lineup.ban) banned.add(next.lineup.ban);
+  const theirs = buildDraft(next, foe.id, banned, rng);
+  const fixture: Fixture = {
+    id: `scrim-${next.year}-${opponentId}`,
+    kind: 'preseason',
+    series: 1,
+    homeId: team.id,
+    awayId: foe.id
+  };
+  const series = simulateSeries(next, rng, fixture, yours, theirs, false);
+  const won = series.winnerId === team.id;
+  const facility = facilityAt(team.facility);
+  const purse = Math.round((won ? 700 : 220) * facility.revenue);
+  book(next, 'Scrim', `${foe.tag} practice`, purse);
+  for (const id of yours.playerIds) {
+    const player = next.players[id];
+    player.form = clamp(player.form + (won ? 1.2 : -0.4), -10, 10);
+    player.morale = clamp(player.morale + (won ? 2 : -1), 5, 100);
+    if (yours.champs[id]) bumpMastery(player, yours.champs[id], 1);
+  }
+  if (won) team.chemistry = clamp(team.chemistry + 1, 15, 100);
+  next.intel[foe.id] = true;
+  const week = findPlayerFixture(next);
+  const sameWeek = week ? opponentOf(week, team.id) === foe.id : false;
+  const scoreline = `${series.homeWins}–${series.awayWins}`;
+  const note = `${won ? 'Won' : 'Lost'} the circuit scrim ${scoreline} against ${foe.name}. Their ${foe.strategy} habit is on the whiteboard.${sameWeek ? ' Their starters will feel the extra fatigue before the real series. So will yours.' : ''}`;
+  return {
+    career: finishScrim(next, rng, {
+      kind: 'circuit',
+      opponentId: foe.id,
+      opponentName: foe.name,
+      won,
+      scoreline,
+      note
+    })
+  };
+}
+
+function offerPairs(career: Career, gapLimit: number): { them: Team; mine: Player; theirs: Player; gap: number }[] {
+  const you = playerTeam(career);
+  const pairs: { them: Team; mine: Player; theirs: Player; gap: number }[] = [];
+  for (const them of career.orgs) {
+    if (them.player) continue;
+    for (const mineId of rosterIds(you)) {
+      const mine = career.players[mineId];
+      for (const theirId of rosterIds(them)) {
+        const theirs = career.players[theirId];
+        if (mine.role !== theirs.role) continue;
+        const gap = overall(mine) - overall(theirs);
+        if (Math.abs(gap) > gapLimit) continue;
+        pairs.push({ them, mine, theirs, gap });
+      }
+    }
+  }
+  return pairs.sort((a, b) => Math.abs(a.gap) - Math.abs(b.gap));
+}
+
+function refreshOffers(career: Career, rng: Rng, force: boolean): void {
+  if (career.stage.kind === 'offseason') {
+    career.offers = [];
+    return;
+  }
+  if (!force && !rng.chance(0.34)) return;
+  const you = playerTeam(career);
+  const pairs = offerPairs(career, force ? 12 : 8).slice(0, 8);
+  if (!pairs.length) return;
+  const pair = rng.pick(pairs);
+  let cash = Math.round((pair.gap * 850) / 50) * 50;
+  if (cash < 0 && you.cash < -cash) cash = 0;
+  const yoursSide = you.main.includes(pair.mine.id) ? 'main roster' : 'development';
+  const theirSide = pair.them.main.includes(pair.theirs.id) ? 'main roster' : 'development';
+  const money =
+    cash > 0 ? ` They will add ${dollars(cash)}.` : cash < 0 ? ` The seat costs ${dollars(-cash)}.` : '';
+  const note = `${pair.them.name} want ${pair.mine.nick} (${overall(pair.mine)} ${pair.mine.role}, ${yoursSide}). They offer ${pair.theirs.nick} (${overall(pair.theirs)} ${pair.theirs.role}, pot ${pair.theirs.potential}, age ${pair.theirs.age}, ${theirSide}).${money}`;
+  const offer: TradeOffer = {
+    id: career.offerSeq++,
+    fromTeamId: pair.them.id,
+    theyGive: pair.theirs.id,
+    theyWant: pair.mine.id,
+    cash,
+    note
+  };
+  career.offers = [offer];
+  pushNews(career, `${pair.them.tag} called about ${pair.mine.nick}.`);
+}
+
+export function forceTradeOffer(career: Career): Career {
+  const next = structuredClone(career);
+  const rng = new Rng(next.rngState);
+  next.offers = [];
+  refreshOffers(next, rng, true);
+  next.rngState = rng.state;
+  return next;
+}
+
+function placeOnRoster(team: Team, outId: string, inId: string): void {
+  const mainIndex = team.main.indexOf(outId);
+  if (mainIndex >= 0) team.main[mainIndex] = inId;
+  else team.dev[team.dev.indexOf(outId)] = inId;
+}
+
+export function acceptTrade(career: Career, offerId: number): { career: Career; error?: string } {
+  const offer = career.offers.find((entry) => entry.id === offerId);
+  if (!offer) return { career, error: 'That call has already gone cold.' };
+  const next = structuredClone(career);
+  const you = playerTeam(next);
+  const them = next.orgs.find((team) => team.id === offer.fromTeamId);
+  const live = next.offers.find((entry) => entry.id === offerId);
+  if (!them || !live) return { career, error: 'That call has already gone cold.' };
+  if (!rosterIds(you).includes(live.theyWant) || !rosterIds(them).includes(live.theyGive)) {
+    return { career: next, error: 'The players in that offer are no longer on those rosters.' };
+  }
+  if (live.cash < 0 && you.cash < -live.cash) return { career: next, error: `You need ${dollars(-live.cash)} to make that deal.` };
+  const incoming = next.players[live.theyGive];
+  const outgoing = next.players[live.theyWant];
+  placeOnRoster(you, live.theyWant, live.theyGive);
+  placeOnRoster(them, live.theyGive, live.theyWant);
+  if (live.cash) book(next, 'Trade', `${them.tag} for ${incoming.nick}`, live.cash);
+  incoming.morale = clamp(incoming.morale - 4, 5, 100);
+  outgoing.morale = clamp(outgoing.morale - 6, 5, 100);
+  you.chemistry = clamp(you.chemistry - 7, 15, 100);
+  them.chemistry = clamp(them.chemistry - 4, 15, 100);
+  next.lineup.playerIds = next.lineup.playerIds.filter((id) => id !== live.theyWant);
+  delete next.lineup.champs[live.theyWant];
+  next.offers = [];
+  pushNews(next, `${outgoing.nick} goes to ${them.name}. ${incoming.nick} joins ${you.tag}.`);
+  return { career: next };
+}
+
+export function declineTrade(career: Career, offerId: number): { career: Career; error?: string } {
+  if (!career.offers.some((entry) => entry.id === offerId)) return { career, error: 'That call has already gone cold.' };
+  const next = structuredClone(career);
+  const offer = next.offers.find((entry) => entry.id === offerId);
+  next.offers = next.offers.filter((entry) => entry.id !== offerId);
+  if (offer) {
+    const them = teamById(next, offer.fromTeamId);
+    pushNews(next, `${playerTeam(next).tag} pass on ${them.tag}'s call.`);
+  }
+  return { career: next };
+}
+
+function crownAwards(career: Career): void {
+  const pool = career.orgs.flatMap((team) => rosterIds(team).map((id) => ({ id, team })));
+  const ranked = [...pool].sort((a, b) => {
+    const left = career.players[b.id];
+    const right = career.players[a.id];
+    return (
+      left.seasonMvps - right.seasonMvps ||
+      left.seasonWins - right.seasonWins ||
+      overall(left) - overall(right)
+    );
+  });
+  const awards: Award[] = [];
+  const mvp = ranked[0];
+  if (mvp && career.players[mvp.id].seasonMvps > 0) {
+    const player = career.players[mvp.id];
+    awards.push({
+      id: 'mvp',
+      title: 'Circuit MVP',
+      year: career.year,
+      playerId: player.id,
+      playerName: player.nick,
+      teamId: mvp.team.id,
+      detail: `${player.seasonMvps} series MVPs, ${player.seasonWins} series wins`
+    });
+  }
+  const breakout = pool
+    .filter((entry) => career.players[entry.id].age <= 21 && career.players[entry.id].seasonGames >= 4)
+    .sort(
+      (a, b) =>
+        career.players[b.id].seasonWins - career.players[a.id].seasonWins ||
+        career.players[b.id].seasonGames - career.players[a.id].seasonGames ||
+        overall(career.players[b.id]) - overall(career.players[a.id])
+    )[0];
+  if (breakout) {
+    const player = career.players[breakout.id];
+    awards.push({
+      id: 'breakout',
+      title: 'Breakout',
+      year: career.year,
+      playerId: player.id,
+      playerName: player.nick,
+      teamId: breakout.team.id,
+      detail: `Age ${player.age}, ${overall(player)} overall, ${player.seasonGames} games`
+    });
+  }
+  career.awards = awards;
+  const headline = awards.find((award) => award.id === 'mvp');
+  if (headline) pushNews(career, `${headline.playerName} is Circuit MVP. ${headline.detail}.`);
 }
 
 export { chooseStarterIds, describeWeek, findPlayerFixture, lineupProblems, playerTeam, rosterIds, teamById };

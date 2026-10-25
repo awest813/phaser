@@ -214,6 +214,9 @@ export function teamPower(
   if (home) total += 3;
   total += facilityAt(team.facility).prep;
   if (draft.playerIds.some((id) => career.players[id].trait === 'leader')) total += 3;
+  const streak = career.streak ?? 0;
+  if (team.player && streak >= 3) total += streak >= 5 ? 8 : 4;
+  if (team.player && streak <= -3) total -= 4;
   return { total, parts };
 }
 
@@ -241,6 +244,9 @@ export function coachNotes(career: Career, opponentStrategy: Strategy): string[]
     if (mastery < 40) notes.push(`${player.nick} is still learning ${champion?.name ?? 'that champion'}.`);
     if (teamById(career, career.playerTeamId).dev.includes(id)) notes.push(`${player.nick} is a development call-up.`);
   }
+  const streak = career.streak ?? 0;
+  if (streak >= 3) notes.push(`${streak} straight wins. Do not get cute.`);
+  if (streak <= -3) notes.push(`Skid of ${-streak}. A clean win matters more than the perfect comp.`);
   if (counters(lineup.strategy, opponentStrategy)) notes.push('Your plan matches up well with how they play.');
   else if (counters(opponentStrategy, lineup.strategy)) notes.push('Their style punishes this plan.');
   if (!notes.length) notes.push('The draft is clean. Queue it.');

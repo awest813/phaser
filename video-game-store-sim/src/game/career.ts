@@ -1,4 +1,4 @@
-import { CHAMPIONS } from './champions.ts';
+import { CHAMPIONS, champName } from './champions.ts';
 import { FACILITIES, facilityAt } from './facilities.ts';
 import {
   aiBan,
@@ -19,6 +19,7 @@ import { bestMasteryId, blankSeasonStats, demand, overall } from './roster.ts';
 import { doubleRoundRobin, singleRoundRobin } from './schedule.ts';
 import type {
   Award,
+  Bounty,
   Career,
   CupState,
   Draft,
@@ -701,10 +702,15 @@ export function createCareer(input: OrgInput, seed: number): Career {
     offers: [],
     offerSeq: 1,
     awards: [],
-    intel: {}
+    intel: {},
+    streak: 0,
+    bounty: null,
+    rivalId: 'iron',
+    rivalHeat: 28
   };
   const notes = rollPatch(career, rng);
   refreshOffers(career, rng, true);
+  career.bounty = rollBounty(career, rng);
   career.rngState = rng.state;
   pushNews(career, `${input.name} open a season in a garage in ${input.city}. The Pantheon Circuit does not care yet.`);
   pushNews(career, `Opening patch ${career.patchName}: ${notes.slice(0, 2).join(' ') || 'The rift barely moves.'}`);
@@ -860,7 +866,7 @@ function trainAll(career: Career, rng: Rng, played: Set<string>): void {
       }
       player.fatigue = clamp(player.fatigue - 14 * facility.recovery, 0, 100);
       player.morale = clamp(player.morale + (68 - player.morale) * 0.08, 5, 100);
-      player.form = clamp(player.form * 0.7, -10, 10);
+      player.form = clamp(player.form * 0.84, -10, 10);
     }
     if (team.training === 'synergy') team.chemistry = clamp(team.chemistry + 2, 15, 100);
   }
@@ -977,6 +983,114 @@ function healStartedInjuries(career: Career, started: Set<string>): void {
   }
 }
 
+export function raceLine(career: Career): string {
+  const stage = career.stage.kind;
+  if (stage === 'offseason') return 'The season is in the books. The market is the next match.';
+  if (stage === 'preseason') return 'Exhibition. Wins here do not move the table, but a streak can.';
+  if (stage === 'cup' || stage === 'cup-semi' || stage === 'cup-final') return 'Spire Cup week. The regular table waits, the building does not.';
+  if (stage === 'play-in' || stage === 'playoff-semi' || stage === 'playoff-final') return 'The bracket is live. One series changes the year.';
+  const rank = rankTeams(career);
+  const place = rank.indexOf(career.playerTeamId) + 1;
+  const rows = standingsFor(career, 'regular');
+  const mine = rows.find((row) => row.teamId === career.playerTeamId);
+  const second = rows.find((row) => row.teamId === rank[1]);
+  const sixth = rows.find((row) => row.teamId === rank[5]);
+  if (!mine || place < 1) return 'The table is still blank.';
+  if (mine.wins + mine.losses === 0) return 'Everyone is 0-0. The first win is the whole story.';
+  if (place <= 2) return `${placeName(place)}. A first-round bye is in the building.`;
+  if (place <= 6) {
+    const gap = Math.max(0, (second?.wins ?? mine.wins) - mine.wins);
+    return gap === 0
+      ? `${placeName(place)}, tied for a bye. The cut is under you.`
+      : `${placeName(place)}, ${gap} win${gap === 1 ? '' : 's'} off a bye. The cut is under you.`;
+  }
+  const need = Math.max(1, (sixth?.wins ?? 0) - mine.wins + 1);
+  return `${placeName(place)}, outside the cut. ${need} more win${need === 1 ? '' : 's'} and the picture changes.`;
+}
+
+function rollBounty(career: Career, rng: Rng): Bounty | null {
+  if (career.stage.kind === 'offseason' || !findPlayerFixture(career)) return null;
+  const fixture = findPlayerFixture(career);
+  const foeId = fixture ? opponentOf(fixture, career.playerTeamId) : '';
+  const pool: Bounty[] = [
+    { id: 'win', text: 'Take the series.', reward: 1400 },
+    { id: 'prospect', text: 'Start a development player.', reward: 1100 },
+    { id: 'fresh', text: 'Queue three players under 45 fatigue.', reward: 900 },
+    { id: 'mains', text: 'Start three players from the main roster.', reward: 800 }
+  ];
+  if (foeId && foeId === career.rivalId) {
+    pool.push({ id: 'rival', text: `Beat ${teamById(career, foeId).name}.`, reward: 2200 });
+  }
+  return rng.pick(pool);
+}
+
+function bumpStreak(career: Career, won: boolean): void {
+  const before = career.streak ?? 0;
+  career.streak = won ? (before > 0 ? before + 1 : 1) : before < 0 ? before - 1 : -1;
+  const team = playerTeam(career);
+  if (won && career.streak >= 3) team.fans += 20 * Math.min(career.streak, 6);
+  if (career.streak === 3) pushNews(career, 'Three straight wins. The building is loud.');
+  if (career.streak === 5) pushNews(career, 'Five straight. The rest of the circuit is watching.');
+  if (career.streak === -3) pushNews(career, 'Three straight losses. Someone has to answer it.');
+}
+
+interface GrowthSnap {
+  ovr: number;
+  mechanics: number;
+  macro: number;
+  teamwork: number;
+  clutch: number;
+  mastery: Record<string, number>;
+}
+
+function growthSnapshot(career: Career): Map<string, GrowthSnap> {
+  const snap = new Map<string, GrowthSnap>();
+  for (const id of rosterIds(playerTeam(career))) {
+    const player = career.players[id];
+    snap.set(id, {
+      ovr: overall(player),
+      mechanics: player.mechanics,
+      macro: player.macro,
+      teamwork: player.teamwork,
+      clutch: player.clutch,
+      mastery: { ...player.mastery }
+    });
+  }
+  return snap;
+}
+
+function growthDiff(career: Career, before: Map<string, GrowthSnap>): { nick: string; text: string }[] {
+  const notes: { nick: string; text: string }[] = [];
+  for (const id of rosterIds(playerTeam(career))) {
+    const player = career.players[id];
+    const was = before.get(id);
+    if (!was) continue;
+    const bits: string[] = [];
+    const ovr = overall(player);
+    if (ovr > was.ovr) bits.push(`OVR ${was.ovr}→${ovr}`);
+    for (const key of ['mechanics', 'macro', 'teamwork', 'clutch'] as const) {
+      if (player[key] > was[key]) bits.push(`${key} ${was[key]}→${player[key]}`);
+    }
+    for (const [champ, value] of Object.entries(player.mastery)) {
+      const prev = was.mastery[champ] ?? 0;
+      if (value >= prev + 2) bits.push(`${champName(champ)} ${prev}→${value}`);
+    }
+    if (bits.length) notes.push({ nick: player.nick, text: bits.slice(0, 3).join(' · ') });
+  }
+  return notes.slice(0, 4);
+}
+
+function nextHook(career: Career): string {
+  if (career.stage.kind === 'offseason') return 'The market is open. Re-sign, or the next season does not start.';
+  const fixture = findPlayerFixture(career);
+  if (!fixture) return career.bounty ? `Bounty: ${career.bounty.text}` : 'The week is open.';
+  const foe = teamById(career, opponentOf(fixture, career.playerTeamId));
+  const where = fixture.homeId === career.playerTeamId ? 'Home' : 'Away';
+  const bounty = career.bounty ? ` Bounty: ${career.bounty.text}` : '';
+  const rival = foe.id === career.rivalId ? ' Rivalry week.' : '';
+  return `Next: ${where} against ${foe.name}.${rival}${bounty}`;
+}
+
 export function playCurrentWeek(career: Career): Career {
   const problems = lineupProblems(career);
   if (problems.length) throw new Error(problems[0]);
@@ -1002,6 +1116,10 @@ export function playCurrentWeek(career: Career): Career {
   };
   const cashBefore = yours.cash;
   const fansBefore = yours.fans;
+  const queued = [...next.lineup.playerIds];
+  const freshQueue = queued.length === 3 && queued.every((id) => (next.players[id]?.fatigue ?? 100) < 45);
+  const prospectStart = queued.some((id) => yours.dev.includes(id));
+  const mainsStart = queued.length === 3 && queued.every((id) => yours.main.includes(id));
   const also: string[] = [];
   let playerPrize = 0;
   let playerPlayed = false;
@@ -1030,6 +1148,14 @@ export function playCurrentWeek(career: Career): Career {
       playerPrize = prizeFor(fixture.kind, report.won === true);
       const upset = foe.fans > yours.fans * 1.5;
       yours.fans = Math.max(200, yours.fans + fanSwing(fixture.kind, report.won === true, upset));
+      if (foeId === next.rivalId) {
+        next.rivalHeat = clamp(next.rivalHeat + (report.won ? 14 : 7), 0, 100);
+        if (report.won) {
+          yours.fans += 30 + Math.round(next.rivalHeat * 0.6);
+          yours.reputation = clamp(yours.reputation + 1, 0, 100);
+          report.notes.push('Rivalry series. The building wanted this one.');
+        } else report.notes.push('Rivalry series. They get to talk until you meet again.');
+      }
       if (report.won && fixture.kind === 'regular') yours.reputation = clamp(yours.reputation + 1, 0, 100);
       if (report.won && fixture.kind === 'cup') yours.reputation = clamp(yours.reputation + 1, 0, 100);
       if (report.won && fixture.kind === 'play-in') yours.reputation = clamp(yours.reputation + 2, 0, 100);
@@ -1046,7 +1172,12 @@ export function playCurrentWeek(career: Career): Career {
   if (next.lastScrim && next.scrimDone) report.notes.unshift(next.lastScrim.note);
   next.offers = [];
   healStartedInjuries(next, startedHurt);
+  const beforeGrowth = growthSnapshot(next);
   trainAll(next, rng, played);
+  report.growth = growthDiff(next, beforeGrowth);
+  if (playerPlayed) bumpStreak(next, report.won === true);
+  report.streakAfter = next.streak;
+  report.raceLine = raceLine(next);
 
   const facility = facilityAt(yours.facility);
   const payroll = rosterIds(yours).reduce((sum, id) => sum + next.players[id].salary, 0);
@@ -1061,6 +1192,26 @@ export function playCurrentWeek(career: Career): Career {
   book(next, week.label, 'Sponsorship', sponsor);
   if (matchDay) book(next, week.label, report.won ? 'Match day' : 'Match day, loss', matchDay);
   if (playerPrize) book(next, week.label, 'Prize money', playerPrize);
+  const bounty = next.bounty;
+  const bountyCleared =
+    !!bounty &&
+    playerPlayed &&
+    ((bounty.id === 'win' && report.won === true) ||
+      (bounty.id === 'prospect' && prospectStart) ||
+      (bounty.id === 'fresh' && freshQueue) ||
+      (bounty.id === 'mains' && mainsStart) ||
+      (bounty.id === 'rival' && report.opponentId === next.rivalId && report.won === true));
+  if (bounty && bountyCleared) {
+    book(next, week.label, 'Bounty', bounty.reward);
+    for (const id of queued) {
+      const player = next.players[id];
+      if (player) player.morale = clamp(player.morale + 2, 5, 100);
+    }
+    pushNews(next, `Bounty cleared: ${bounty.text}`);
+    report.bountyNote = `Bounty cleared: ${bounty.text} ${dollars(bounty.reward)}.`;
+  } else if (bounty && playerPlayed) {
+    report.bountyNote = `Bounty missed: ${bounty.text}`;
+  }
   if (content) book(next, week.label, 'Campus content', content);
   book(next, week.label, 'Salaries', -payroll);
   book(next, week.label, `${facility.name} upkeep`, -facility.upkeep);
@@ -1084,6 +1235,8 @@ export function playCurrentWeek(career: Career): Career {
 
   advance(next, rng, report);
   next.scrimDone = false;
+  next.bounty = next.stage.kind === 'offseason' ? null : rollBounty(next, rng);
+  report.nextHook = nextHook(next);
   if (next.stage.kind !== 'offseason') refreshOffers(next, rng, false);
   report.cashDelta = yours.cash - cashBefore;
   report.fansDelta = yours.fans - fansBefore;
@@ -1604,9 +1757,12 @@ export function beginNextSeason(career: Career): { career: Career; error?: strin
   next.lastScrim = null;
   next.offers = [];
   next.intel = {};
+  next.streak = 0;
+  next.rivalHeat = clamp((next.rivalHeat ?? 20) - 8, 12, 100);
   for (const champion of CHAMPIONS) next.patch[champion.id] = 0;
   const rng = new Rng(next.rngState);
   const notes = rollPatch(next, rng);
+  next.bounty = rollBounty(next, rng);
   next.rngState = rng.state;
   pushNews(next, `Season ${next.year} opens. Patch ${next.patchName}: ${notes[0] ?? 'A quiet rift.'}`);
   const filled = autofillLineup(next);
@@ -1654,6 +1810,10 @@ export function normalizeCareer(career: Career): Career {
   career.offerSeq ??= 1;
   career.awards ??= [];
   career.intel ??= {};
+  career.streak ??= 0;
+  career.bounty ??= null;
+  career.rivalId ??= 'iron';
+  career.rivalHeat ??= 28;
   for (const season of career.history) season.mvp ??= 'Unawarded';
   return career;
 }

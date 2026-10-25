@@ -156,9 +156,14 @@ p { line-height: 1.45; }
 .meter { display: grid; min-width: 6.2rem; }
 .meter span, .pills span { color: var(--muted); font-size: 0.68rem; letter-spacing: 0.12em; text-transform: uppercase; }
 .meter strong { font-size: 0.98rem; font-variant-numeric: tabular-nums; }
+.meter.hot { border-color: color-mix(in srgb, var(--ok) 55%, var(--line)); }
+.meter.hot strong { color: var(--ok); }
+.meter.cold { border-color: color-mix(in srgb, var(--danger) 55%, var(--line)); }
+.meter.cold strong { color: #ffb0a6; }
 .pills span { color: var(--gold); font-size: 0.85rem; letter-spacing: 0; text-transform: none; border-radius: 999px; }
 .topbar, .spread, .section-head { justify-content: space-between; }
-.section-head { align-items: end; gap: 1rem; margin-bottom: 0.2rem; }
+.section-head { align-items: end; gap: 1rem; margin-bottom: 0.2rem; flex-wrap: wrap; }
+.section-head .bounty { min-width: min(100%, 22rem); }
 .section-head p { margin: 0; max-width: 40rem; color: var(--muted); }
 .tag.role-warden { color: var(--warden); }
 .tag.role-slayer { color: var(--slayer); }
@@ -366,6 +371,43 @@ tr.in td { color: var(--ok); }
 .how p, .offer p { margin-top: 0; }
 .scrim-note { color: var(--ok); }
 .scrim-row { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.hook { color: var(--gold); font-weight: 650; margin-top: 0; }
+.streak-hot { color: var(--ok); font-weight: 700; }
+.streak-cold { color: #ffb0a6; font-weight: 700; }
+.rival { color: #ffd0c6; }
+.bounty {
+  display: flex;
+  gap: 0.55rem;
+  align-items: baseline;
+  margin: 0.35rem 0 0.7rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--gold) 50%, var(--line));
+  background: rgba(228, 194, 122, 0.08);
+}
+.bounty strong { letter-spacing: 0.14em; text-transform: uppercase; font-size: 0.68rem; color: var(--gold); }
+.bounty span { margin-left: auto; color: var(--gold); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pulse {
+  border-color: color-mix(in srgb, var(--gold) 55%, var(--line));
+  background:
+    radial-gradient(480px 140px at 0% 0%, rgba(228, 194, 122, 0.16), transparent 70%),
+    rgba(16, 19, 28, 0.82);
+}
+.hook-next {
+  font-family: Cinzel, Georgia, serif;
+  font-size: clamp(1.35rem, 2.4vw, 1.9rem);
+  line-height: 1.15;
+  margin: 0.1rem 0 0.45rem;
+}
+.growth { margin: 0.45rem 0 0; padding: 0; list-style: none; }
+.growth li {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.growth strong { color: var(--ok); }
 
 @media (max-width: 1100px) {
   .roster-grid.main { grid-template-columns: repeat(2, minmax(0, 1fr)); }

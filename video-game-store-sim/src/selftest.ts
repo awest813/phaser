@@ -7,6 +7,7 @@ import {
   playerPlace,
   playerStanding,
   playerTeam,
+  raceLine,
   rankTeams,
   rosterIds,
   rosterReady,
@@ -99,12 +100,20 @@ function run(): void {
   let app = apply(initialApp(), { type: 'begin' });
   if (!app.career) throw new Error('career missing');
   assert(app.career.offers.length === 1, 'opening trade call');
+  assert(app.career.bounty && app.career.bounty.reward > 0, 'opening bounty');
+  assert(app.career.rivalId === 'iron', 'rival');
+  assert(app.career.rivalHeat >= 12, 'rival heat');
+  assert(raceLine(app.career).length > 8, 'race line');
   const bare = structuredClone(app.career);
   delete (bare as { offers?: unknown }).offers;
   delete (bare as { intel?: unknown }).intel;
   delete (bare as { awards?: unknown }).awards;
+  delete (bare as { streak?: unknown }).streak;
+  delete (bare as { bounty?: unknown }).bounty;
+  delete (bare as { rivalId?: unknown }).rivalId;
   normalizeCareer(bare);
   assert(Array.isArray(bare.offers) && bare.intel && Array.isArray(bare.awards), 'normalize');
+  assert(bare.streak === 0 && bare.bounty === null && bare.rivalId === 'iron', 'loop defaults');
   const house = runHouseScrim(app.career);
   assert(!house.error, house.error ?? 'house');
   assert(house.career.scrimDone, 'house scrim not marked');
@@ -115,6 +124,12 @@ function run(): void {
   app.career = autofill(app.career);
   app.career = playCurrentWeek(app.career);
   assert(!app.career.scrimDone, 'scrim should reset after the match');
+  assert(Array.isArray(app.career.lastReport?.growth), 'growth');
+  assert((app.career.lastReport?.nextHook ?? '').startsWith('Next:'), 'next hook');
+  assert((app.career.lastReport?.raceLine ?? '').length > 8, 'result race line');
+  assert(app.career.streak === 1 || app.career.streak === -1, 'streak moved');
+  assert(app.career.bounty !== null, 'bounty rerolled');
+  assert((app.career.lastReport?.bountyNote ?? '').startsWith('Bounty'), 'bounty result');
   const circuit = runCircuitScrim(app.career, 'iron');
   assert(!circuit.error, circuit.error ?? 'circuit');
   assert(circuit.career.intel.iron, 'scrim intel');

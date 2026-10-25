@@ -154,6 +154,19 @@ export interface WeekReport {
   fansDelta: number;
   notes: string[];
   patchNotes: string[];
+  growth?: { nick: string; text: string }[];
+  bountyNote?: string;
+  raceLine?: string;
+  nextHook?: string;
+  streakAfter?: number;
+}
+
+export type BountyId = 'win' | 'prospect' | 'fresh' | 'mains' | 'rival';
+
+export interface Bounty {
+  id: BountyId;
+  text: string;
+  reward: number;
 }
 
 export type Stage =
@@ -291,6 +304,10 @@ export interface Career {
   offerSeq: number;
   awards: Award[];
   intel: Record<string, boolean>;
+  streak: number;
+  bounty: Bounty | null;
+  rivalId: string;
+  rivalHeat: number;
 }
 
 export interface AppState {

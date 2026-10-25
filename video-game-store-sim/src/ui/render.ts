@@ -4,6 +4,7 @@ import {
   playerPlace,
   playerStanding,
   playerTeam,
+  raceLine,
   rankGroup,
   rankTeams,
   rosterIds,
@@ -155,6 +156,7 @@ function shell(app: AppState, content: string): string {
       <header class="topbar">
         <div class="phase"><span class="kicker">${esc(phaseLabel(career))}</span><strong>${esc(describeWeek(career)?.label ?? 'Offseason')}</strong></div>
         <div class="meters">
+          ${streakMeter(career.streak ?? 0)}
           <div class="meter"><span>Cash</span><strong>${money(team.cash)}</strong></div>
           <div class="meter"><span>Fans</span><strong>${team.fans.toLocaleString('en-US')}</strong></div>
           <div class="meter"><span>House</span><strong>${esc(facilityAt(team.facility).name)}</strong></div>
@@ -164,6 +166,27 @@ function shell(app: AppState, content: string): string {
       ${content}
     </div>
   </div>`;
+}
+
+function streakMeter(streak: number): string {
+  if (streak === 0) return '';
+  const hot = streak > 0;
+  return `<div class="meter ${hot ? 'hot' : 'cold'}"><span>${hot ? 'Streak' : 'Skid'}</span><strong>${hot ? `W${streak}` : `L${Math.abs(streak)}`}</strong></div>`;
+}
+
+function streakCopy(streak: number): string {
+  if (streak >= 5) return `Win streak W${streak}. The next series carries +8 power.`;
+  if (streak >= 3) return `Win streak W${streak}. The next series carries +4 power.`;
+  if (streak >= 1) return `Win streak W${streak}. One more and the building notices.`;
+  if (streak <= -3) return `Skid L${Math.abs(streak)}. The next series is down 4 power until you stop it.`;
+  if (streak <= -1) return `Skid L${Math.abs(streak)}. A win flips it.`;
+  return '';
+}
+
+function bountyLine(career: Career): string {
+  const bounty = career.bounty;
+  if (!bounty) return '';
+  return `<p class="bounty"><strong>Bounty</strong> ${esc(bounty.text)} <span>${money(bounty.reward)}</span></p>`;
 }
 
 function phaseLabel(career: Career): string {
@@ -252,6 +275,10 @@ function officeScreen(app: AppState): string {
       <div>
         <p class="kicker">${foe ? (fixture?.homeId === team.id ? 'Home' : 'Away') : 'No match'}</p>
         <h1>${foe ? `vs ${esc(foe.name)}` : career.stage.kind === 'offseason' ? 'The season is over' : 'Open week'}</h1>
+        <p class="hook">${esc(raceLine(career))}</p>
+        ${streakCopy(career.streak ?? 0) ? `<p class="${(career.streak ?? 0) > 0 ? 'streak-hot' : 'streak-cold'}">${esc(streakCopy(career.streak ?? 0))}</p>` : ''}
+        ${bountyLine(career)}
+        ${foe && foe.id === career.rivalId ? `<p class="rival">Rivalry week against ${esc(foe.name)}. Heat ${career.rivalHeat}. A win here pays extra fans and turns the heat up.</p>` : `<p class="muted">Rivalry with ${esc(teamById(career, career.rivalId).name)} sits at heat ${career.rivalHeat}.</p>`}
         <p>${foe ? esc(foe.blurb) : 'Use the week to train, or open the offseason market.'}</p>
         <div class="row">
           ${career.stage.kind === 'offseason' ? '<button class="btn primary" type="button" data-act="goto" data-screen="offseason">Open offseason</button>' : '<button class="btn primary" type="button" data-act="goto" data-screen="match">Match day</button>'}
@@ -279,7 +306,7 @@ function officeScreen(app: AppState): string {
     </div>
     <article class="panel how span-2">
       <h2>How a week works</h2>
-      <p>Spend the practice block on a house set or a circuit scrim, then set training. On match day, ban one champion, queue three players, lock their champions, and pick a plan. Trade calls expire when the match is queued. Development players can be called up when a starter is tired or hurt.</p>
+      <p>Clear the bounty, then queue the match. A win streak starts paying fans at three and adds series power at three and five. The practice block is one house set or one circuit scrim. Trade calls expire when the match is queued.</p>
       ${week ? '' : ''}
     </article>
     ${career.history.length ? `<article class="panel span-2"><h2>Previous seasons</h2><ul class="news">${career.history.map((season) => `<li>Season ${season.year}: ${season.wins}-${season.losses}, Cup ${esc(season.cup)}, Playoffs ${esc(season.playoff)}, MVP ${esc(season.mvp)}</li>`).join('')}</ul></article>` : ''}
@@ -439,8 +466,13 @@ function matchScreen(app: AppState): string {
   const foeRecord = standingsFor(career, 'regular').find((row) => row.teamId === foe.id);
   return `<section class="stack draft">
     <header class="section-head">
-      <h1>${esc(foe.name)}</h1>
-      <p>${fixture.homeId === team.id ? 'Home' : 'Away'} on Spire Rift — one lane, Ash Path, Mirror Path, and the Worldheart pit. Series length ${fixture.series === 1 ? 'one game' : `best of ${fixture.series}`}.</p>
+      <div>
+        <p class="kicker">${foe.id === career.rivalId ? `Rivalry week · heat ${career.rivalHeat}` : fixture.homeId === team.id ? 'Home' : 'Away'}</p>
+        <h1>${esc(foe.name)}</h1>
+        <p>${fixture.homeId === team.id ? 'Home' : 'Away'} on Spire Rift — one lane, Ash Path, Mirror Path, and the Worldheart pit. Series length ${fixture.series === 1 ? 'one game' : `best of ${fixture.series}`}.</p>
+        ${streakCopy(career.streak ?? 0) ? `<p class="${(career.streak ?? 0) > 0 ? 'streak-hot' : 'streak-cold'}">${esc(streakCopy(career.streak ?? 0))}</p>` : ''}
+      </div>
+      ${bountyLine(career)}
     </header>
     <div class="split">
       <article class="panel">
@@ -520,11 +552,23 @@ function resultScreen(app: AppState): string {
   if (!career || !report) return `<section class="stack"><h1>No result</h1></section>`;
   const kind = kindLabel(report.kind);
   const tone = report.won === undefined ? '' : report.won ? 'win' : 'loss';
+  const streak = report.streakAfter ?? career.streak ?? 0;
+  const streakMark = streak >= 2 ? ` · W${streak}` : streak <= -2 ? ` · L${Math.abs(streak)}` : '';
+  const growth = report.growth ?? [];
+  const offseason = career.stage.kind === 'offseason';
   return `<section class="stack scoreboard ${tone}">
     <p class="kicker">${esc(report.label)} · ${esc(kind)}</p>
-    <h1>${report.won === undefined ? 'Week complete' : report.won ? 'Victory' : 'Defeat'} ${report.scoreline ? esc(report.scoreline) : ''}</h1>
+    <h1>${report.won === undefined ? 'Week complete' : report.won ? 'Victory' : 'Defeat'}${streakMark} ${report.scoreline ? esc(report.scoreline) : ''}</h1>
     <p>${report.opponentName ? `${report.home ? 'Home' : 'Away'} against ${esc(report.opponentName)}.` : ''} ${report.mvpName ? `${esc(report.mvpName)} takes MVP.` : ''}</p>
-    <div class="pills"><span>${money(report.cashDelta)} cash</span><span>${report.fansDelta >= 0 ? '+' : ''}${report.fansDelta} fans</span></div>
+    <div class="pills"><span>${money(report.cashDelta)} cash</span><span>${report.fansDelta >= 0 ? '+' : ''}${report.fansDelta} fans</span>${report.bountyNote?.startsWith('Bounty cleared') ? '<span>Bounty paid</span>' : ''}</div>
+    <article class="panel pulse">
+      <p class="kicker">${offseason ? 'The market' : 'Next week'}</p>
+      <p class="hook-next">${esc(report.nextHook ?? 'The week is open.')}</p>
+      ${report.raceLine ? `<p class="hook">${esc(report.raceLine)}</p>` : ''}
+      ${streakCopy(streak) ? `<p class="${streak > 0 ? 'streak-hot' : 'streak-cold'}">${esc(streakCopy(streak))}</p>` : ''}
+      ${report.bountyNote ? `<p class="${report.bountyNote.startsWith('Bounty cleared') ? 'scrim-note' : 'warn'}">${esc(report.bountyNote)}</p>` : ''}
+      ${growth.length ? `<ul class="growth">${growth.map((line) => `<li><strong>${esc(line.nick)}</strong><span>${esc(line.text)}</span></li>`).join('')}</ul>` : '<p class="muted">No one jumped a number this week. The next block of training is where that changes.</p>'}
+    </article>
     ${report.notes.map((line) => `<p>${esc(line)}</p>`).join('')}
     ${report.patchNotes.length ? `<article class="banner"><div><p class="kicker">Patch ${esc(career.patchName)}</p><p>${report.patchNotes.map((line) => esc(line)).join(' ')}</p></div></article>` : ''}
     ${report.games.map((game, index) => `<article class="panel">
@@ -532,7 +576,7 @@ function resultScreen(app: AppState): string {
       <p>${game.homeKills}–${game.awayKills} kills · Worldheart ${game.homeHeart}–${game.awayHeart} · gold ${Math.round(game.homeGold / 1000)}k–${Math.round(game.awayGold / 1000)}k</p>
       <ol class="timeline">${game.timeline.map((beat) => `<li><time>${esc(beat.t)}</time><span>${esc(beat.text)}</span></li>`).join('')}</ol>
     </article>`).join('')}
-    <button class="btn primary" type="button" data-act="dismiss-result">Continue</button>
+    <button class="btn primary" type="button" data-act="dismiss-result">${offseason ? 'Open the market' : 'Next week'}</button>
   </section>`;
 }
 

@@ -241,7 +241,60 @@ p { line-height: 1.45; }
   padding: 0.85rem 0.9rem;
 }
 .plan-grid button strong { display: block; margin-bottom: 0.35rem; }
+.plan-grid button em { display: block; margin: 0 0 0.4rem; color: var(--gold); font-style: normal; font-size: 0.78rem; font-weight: 400; line-height: 1.35; }
 .plan-locked .btn { margin-top: 0.4rem; }
+.scene {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+}
+.scene .bust .art {
+  height: 100%;
+  min-height: 240px;
+  aspect-ratio: auto;
+  border-radius: 18px 0 0 18px;
+}
+.scene.slim { grid-template-columns: 132px minmax(0, 1fr); }
+.scene.slim .bust .art { min-height: 156px; }
+.scene.slim p.line { font-size: 1.02rem; }
+.scene-body { padding: 0.95rem 1.1rem 1rem; display: grid; align-content: start; gap: 0.55rem; }
+.scene-top { display: flex; justify-content: space-between; gap: 1rem; align-items: start; }
+.nameplate {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.55rem;
+  background: linear-gradient(90deg, var(--gold), #f3dcab);
+  color: #24190c;
+  padding: 0.18rem 0.9rem 0.12rem 0.55rem;
+  clip-path: polygon(0 0, 100% 0, 94% 100%, 0 100%);
+}
+.nameplate strong { font-family: Cinzel, Georgia, serif; letter-spacing: 0.08em; font-size: 1rem; }
+.nameplate small { font-size: 0.62rem; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 700; }
+.link-rank { display: flex; align-items: center; gap: 0.45rem; margin-top: 0.35rem; color: var(--muted); font-size: 0.72rem; letter-spacing: 0.14em; text-transform: uppercase; }
+.pips { display: inline-flex; gap: 0.22rem; }
+.pips i { width: 0.42rem; height: 0.42rem; border-radius: 99px; border: 1px solid var(--gold); display: block; }
+.pips i.on { background: var(--gold); }
+.dateplate { text-align: right; min-width: 4.6rem; }
+.dateplate span, .dateplate em { display: block; font-size: 0.62rem; letter-spacing: 0.16em; text-transform: uppercase; color: var(--gold); font-style: normal; }
+.dateplate strong { font-family: Cinzel, Georgia, serif; font-size: 2rem; line-height: 0.9; }
+.scene p.line { margin: 0.15rem 0 0; font-size: 1.16rem; line-height: 1.4; max-width: 44rem; }
+.replies { display: grid; gap: 0.45rem; margin-top: 0.15rem; }
+.replies button {
+  display: flex;
+  gap: 0.7rem;
+  align-items: start;
+  text-align: left;
+  border-radius: 12px;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--line);
+  background: #171c27;
+}
+.replies button b { color: var(--gold); font-family: Cinzel, Georgia, serif; font-size: 1.05rem; min-width: 0.8rem; }
+.replies button strong { display: block; }
+.replies button em { display: block; color: var(--muted); font-style: normal; font-size: 0.8rem; font-weight: 400; }
+.news .pips { margin-left: 0.35rem; vertical-align: middle; }
 .choice { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.55rem; }
 .choice.room-choice { grid-template-columns: 1fr 1fr; }
 .choice button { min-height: 4.6rem; }
@@ -442,7 +495,8 @@ tr.in td { color: var(--ok); }
 }
 
 @media (max-width: 980px) {
-  .shell, .create, .split, .hero-card, .detail, .choice, .desk { grid-template-columns: 1fr; }
+  .shell, .create, .split, .hero-card, .detail, .choice, .desk, .scene { grid-template-columns: 1fr; }
+  .scene .bust .art { min-height: 200px; aspect-ratio: 16 / 9; border-radius: 18px 18px 0 0; }
   .desk > .span-2 { grid-column: auto; }
   .side { position: sticky; top: 0; height: auto; z-index: 4; border-right: 0; border-bottom: 1px solid var(--line); }
   .side::before { width: 100%; height: 3px; inset: auto 0 0 0; background: linear-gradient(90deg, var(--org), transparent 70%); }

@@ -32,6 +32,7 @@ import type {
   PlayoffState,
   Role,
   RoomEvent,
+  WeekPlan,
   ScrimReport,
   SeriesState,
   Strategy,
@@ -719,7 +720,9 @@ export function createCareer(input: OrgInput, seed: number): Career {
     promiseId: null,
     room: null,
     roomSpent: false,
-    roomEcho: ''
+    roomEcho: '',
+    plan: null,
+    planNote: ''
   };
   const notes = rollPatch(career, rng);
   refreshOffers(career, rng, true);
@@ -854,7 +857,10 @@ function trainAll(career: Career, rng: Rng, played: Set<string>): void {
       const onDev = team.dev.includes(id);
       const prodigy = player.trait === 'prodigy' && player.age <= 21 ? 1.3 : 1;
       const mult = facility.training * (onDev ? facility.dev : 1) * prodigy;
-      if (team.training === 'rest') {
+      const planned = team.player && !!career.plan;
+      if (planned) {
+        // The week's plan already paid out before the draft.
+      } else if (team.training === 'rest') {
         player.fatigue -= 14;
         player.morale = clamp(player.morale + 3, 5, 100);
       } else if (team.training === 'academy') {
@@ -884,7 +890,7 @@ function trainAll(career: Career, rng: Rng, played: Set<string>): void {
       player.morale = clamp(player.morale + (68 - player.morale) * 0.08, 5, 100);
       player.form = clamp(player.form * 0.84, -10, 10);
     }
-    if (team.training === 'synergy') team.chemistry = clamp(team.chemistry + 2, 15, 100);
+    if (team.training === 'synergy' && !(team.player && career.plan)) team.chemistry = clamp(team.chemistry + 2, 15, 100);
   }
 }
 
@@ -1555,6 +1561,9 @@ export function playCurrentWeek(career: Career): Career {
   }
 
   advance(next, rng, report);
+  if (next.planNote) report.planNote = next.planNote;
+  next.plan = null;
+  next.planNote = '';
   next.scrimDone = false;
   if (next.roomEcho) report.roomNote = next.roomEcho;
   next.roomEcho = '';
@@ -2090,6 +2099,8 @@ export function beginNextSeason(career: Career): { career: Career; error?: strin
   const rng = new Rng(next.rngState);
   const notes = rollPatch(next, rng);
   next.promiseId = null;
+  next.plan = null;
+  next.planNote = '';
   next.roomEcho = '';
   next.bounty = rollBounty(next, rng);
   next.room = rollRoom(next, rng);
@@ -2150,6 +2161,8 @@ export function normalizeCareer(career: Career): Career {
   career.room ??= null;
   career.roomSpent ??= false;
   career.roomEcho ??= '';
+  career.plan ??= null;
+  career.planNote ??= '';
   for (const player of Object.values(career.players)) {
     player.sat ??= 0;
     if (!player.study) player.study = bestMasteryId(player) || 'brynhild';
@@ -2171,6 +2184,50 @@ function finishScrim(career: Career, rng: Rng, report: ScrimReport): Career {
   career.rngState = rng.state;
   pushNews(career, report.note);
   return career;
+}
+
+export function lockPlan(career: Career, plan: WeekPlan): { career: Career; error?: string } {
+  if (career.stage.kind === 'offseason' || !findPlayerFixture(career)) return { career, error: 'There is no match to plan for.' };
+  if (career.plan || career.scrimDone) return { career, error: 'The plan is already locked.' };
+  if (plan === 'house' || plan === 'scrim') {
+    const fixture = findPlayerFixture(career);
+    const foeId = fixture ? opponentOf(fixture, career.playerTeamId) : '';
+    const result = plan === 'house' ? runHouseScrim(career) : runCircuitScrim(career, foeId);
+    if (result.error) return result;
+    result.career.plan = plan;
+    result.career.planNote = result.career.lastScrim?.note ?? 'The plan is locked.';
+    return result;
+  }
+  const next = structuredClone(career);
+  const team = playerTeam(next);
+  const facility = facilityAt(team.facility);
+  if (plan === 'study') {
+    const bits: string[] = [];
+    for (const id of rosterIds(team)) {
+      const player = next.players[id];
+      if (player.injured > 0) continue;
+      const before = player.mastery[player.study] ?? 0;
+      const gain = Math.max(2, Math.round((team.main.includes(id) ? 4 : 3) * facility.training));
+      bumpMastery(player, player.study, gain);
+      player.fatigue = clamp(player.fatigue + 5, 0, 100);
+      if (bits.length < 3) bits.push(`${player.nick} ${champName(player.study)} ${before}→${player.mastery[player.study]}`);
+    }
+    next.planNote = `Study block. ${bits.join(' · ')}.`;
+  } else {
+    let dropped = 0;
+    for (const id of rosterIds(team)) {
+      const player = next.players[id];
+      const before = player.fatigue;
+      player.fatigue = clamp(player.fatigue - 18, 0, 100);
+      player.morale = clamp(player.morale + 3, 5, 100);
+      dropped += before - player.fatigue;
+    }
+    next.planNote = `Rest day. ${Math.round(dropped)} fatigue came off the roster before the draft.`;
+  }
+  next.plan = plan;
+  next.scrimDone = true;
+  pushNews(next, next.planNote);
+  return { career: next };
 }
 
 export function runHouseScrim(career: Career): { career: Career; error?: string } {

@@ -23,6 +23,7 @@ import { FACILITIES } from './game/facilities.ts';
 import { bestChampFor, describeWeek, lineupProblems, suggestBan } from './game/match.ts';
 import { CHAMPIONS } from './game/champions.ts';
 import { overall } from './game/roster.ts';
+import { linkRank, morningLine, roomSpeech, tapeSpeech } from './game/voice.ts';
 import { doubleRoundRobin } from './game/schedule.ts';
 import type { Career } from './game/types.ts';
 
@@ -110,6 +111,10 @@ function run(): void {
   assert(raceLine(app.career).length > 8, 'race line');
   assert(app.career.plan === null, 'week starts on the plan');
   assert(app.career.room && app.career.room.a.label.length > 2, 'opening room');
+  const spoken = roomSpeech(app.career);
+  assert(spoken && spoken.text.length > 12 && app.career.players[spoken.speakerId], spoken?.text ?? 'room speaks');
+  assert(linkRank(app.career, 'mina') >= 1 && linkRank(app.career, 'mina') <= 5, 'link rank');
+  assert(morningLine(app.career).text.length > 12, 'morning line');
   const studiedPlan = lockPlan(structuredClone(app.career), 'study');
   assert(!studiedPlan.error && studiedPlan.career.plan === 'study', studiedPlan.error ?? 'study plan');
   assert(studiedPlan.career.players.kite.mastery.skadi > app.career.players.kite.mastery.skadi, 'study moved mastery');
@@ -138,7 +143,7 @@ function run(): void {
   assert(offRole.error, 'study role');
   const answered = chooseRoom(app.career, 'a');
   assert(!answered.error && answered.career.roomSpent, answered.error ?? 'room choice');
-  assert(answered.career.roomEcho.length > 8, 'room echo');
+  assert(answered.career.roomEcho.length > 8 && /\b(I|We)\b/.test(answered.career.roomEcho), answered.career.roomEcho);
   assert(chooseRoom(answered.career, 'b').error, 'room once');
   app.career = answered.career;
   const bare = structuredClone(app.career);
@@ -171,6 +176,8 @@ function run(): void {
   assert(app.career.bounty !== null, 'bounty rerolled');
   assert((app.career.lastReport?.bountyNote ?? '').startsWith('Bounty'), 'bounty result');
   assert((app.career.lastReport?.roomNote ?? '').length > 8, 'room carried into the result');
+  const tape = app.career.lastReport ? tapeSpeech(app.career, app.career.lastReport) : null;
+  assert(tape && tape.text.length > 12 && app.career.players[tape.speakerId], tape?.text ?? 'tape speaks');
   assert(app.career.room && !app.career.roomSpent, 'next room');
   const circuit = runCircuitScrim(app.career, 'iron');
   assert(!circuit.error, circuit.error ?? 'circuit');

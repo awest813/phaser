@@ -28,7 +28,9 @@ import {
   teamPower
 } from '../game/match.ts';
 import { TRAIT_COPY, bestMasteryId, demand, masteryLabel, overall, roleChamps } from '../game/roster.ts';
-import type { AppState, Career, Champion, MatchKind, Player, Strategy, Team } from '../game/types.ts';
+import { confidantLine, draftSpeech, linkRank, morningLine, planSpeech, roomSpeech, tapeSpeech } from '../game/voice.ts';
+import type { Speech } from '../game/voice.ts';
+import type { AppState, Career, Champion, MatchKind, Player, RoomEvent, Strategy, Team, WeekPlan } from '../game/types.ts';
 
 const STRATEGIES: { id: Strategy; name: string; text: string }[] = [
   { id: 'snowball', name: 'Snowball', text: 'End it early. Strong into scaling comps.' },
@@ -220,20 +222,71 @@ function body(app: AppState): string {
   }
 }
 
-function roomBlock(career: Career): string {
-  if (career.stage.kind === 'offseason' || !career.room) return '';
-  if (career.roomSpent) {
-    return `<article class="panel"><h2>The room</h2><p class="scrim-note">${esc(career.roomEcho || 'The conversation is settled for this week.')}</p></article>`;
+function pips(rank: number): string {
+  return `<span class="pips">${[1, 2, 3, 4, 5].map((n) => `<i class="${n <= rank ? 'on' : ''}"></i>`).join('')}</span>`;
+}
+
+function datePlate(career: Career): string {
+  const stage = career.stage;
+  let phase = 'Offseason';
+  let n = '—';
+  if (stage.kind === 'preseason') {
+    phase = 'Preseason';
+    n = String(stage.round + 1).padStart(2, '0');
+  } else if (stage.kind === 'regular') {
+    phase = 'Regular';
+    n = String(stage.round + 1).padStart(2, '0');
+  } else if (stage.kind === 'cup') {
+    phase = 'Spire Cup';
+    n = String(stage.round + 1).padStart(2, '0');
+  } else if (stage.kind === 'cup-semi') {
+    phase = 'Spire Cup';
+    n = 'SF';
+  } else if (stage.kind === 'cup-final') {
+    phase = 'Spire Cup';
+    n = 'F';
+  } else if (stage.kind === 'play-in') {
+    phase = 'Playoffs';
+    n = 'IN';
+  } else if (stage.kind === 'playoff-semi') {
+    phase = 'Playoffs';
+    n = 'SF';
+  } else if (stage.kind === 'playoff-final') {
+    phase = 'Playoffs';
+    n = 'F';
   }
-  const room = career.room;
-  return `<article class="panel">
-    <h2>The room</h2>
-    <p>${esc(room.text)}</p>
-    <div class="choice room-choice">
-      <button type="button" data-act="room" data-side="a"><strong>${esc(room.a.label)}</strong><span>${esc(room.a.detail)}</span></button>
-      <button type="button" data-act="room" data-side="b"><strong>${esc(room.b.label)}</strong><span>${esc(room.b.detail)}</span></button>
+  const numbered = /^\d/.test(n);
+  return `<div class="dateplate"><span>${esc(phase)}</span><strong>${esc(n)}</strong>${numbered ? '<em>Week</em>' : ''}</div>`;
+}
+
+function scene(career: Career, speech: Speech, opts: { date?: boolean; replies?: RoomEvent | null; slim?: boolean } = {}): string {
+  const player = career.players[speech.speakerId];
+  if (!player) return '';
+  const rank = linkRank(career, player.id);
+  const replies = opts.replies;
+  return `<article class="panel scene${opts.slim ? ' slim' : ''}">
+    <div class="bust">${art(player.portrait, player.nick)}</div>
+    <div class="scene-body">
+      <div class="scene-top">
+        <div>
+          <div class="nameplate"><strong>${esc(player.nick)}</strong><small>${esc(TRAIT_COPY[player.trait].name)}</small></div>
+          <div class="link-rank">Link ${rank} ${pips(rank)}</div>
+        </div>
+        ${opts.date ? datePlate(career) : ''}
+      </div>
+      <p class="line">${esc(speech.text)}</p>
+      ${replies ? `<div class="replies">
+        <button type="button" data-act="room" data-side="a"><b>1</b><span><strong>${esc(replies.a.label)}</strong><em>${esc(replies.a.detail)}</em></span></button>
+        <button type="button" data-act="room" data-side="b"><b>2</b><span><strong>${esc(replies.b.label)}</strong><em>${esc(replies.b.detail)}</em></span></button>
+      </div>` : ''}
     </div>
   </article>`;
+}
+
+function officeScene(career: Career): string {
+  const asking = career.room && !career.roomSpent ? roomSpeech(career) : null;
+  const speech = asking ?? morningLine(career);
+  return scene(career, speech, { date: true, replies: asking ? career.room : null });
 }
 
 function planBlock(career: Career): string {
@@ -248,16 +301,22 @@ function planBlock(career: Career): string {
       <button class="btn primary" type="button" data-act="goto" data-screen="match">Open the draft</button>
     </article>`;
   }
-  const cards = [
+  const cards: [WeekPlan, string, string][] = [
     ['scrim', `Scrim ${foe.tag}`, 'One game against this opponent. A purse, fatigue on both lineups, and their habit on the board.'],
     ['house', 'House', 'Starters against prospects. Chemistry rises. Everyone tires.'],
     ['study', 'Study', 'Each player works the champion they are studying. Mastery moves before the draft.'],
     ['rest', 'Rest', 'Fatigue comes off now, so the players you queue are the fresh ones.']
   ];
   return `<article class="panel span-2">
-    <h2>The plan</h2>
-    <p>One plan for the week. It resolves before you ban anyone, and it is the only practice you get.</p>
-    <div class="plan-grid">${cards.map(([id, name, text]) => `<button type="button" data-act="plan" data-plan="${id}"><strong>${esc(name)}</strong><span>${esc(text)}</span></button>`).join('')}</div>
+    <h2>The week</h2>
+    <p>One plan. It happens before you ban anyone, and it is the only practice you get.</p>
+    <div class="plan-grid">${cards
+      .map(([id, name, text]) => {
+        const voice = planSpeech(career, id);
+        const who = career.players[voice.speakerId];
+        return `<button type="button" data-act="plan" data-plan="${id}"><strong>${esc(name)}</strong><em>${who ? esc(who.nick) : ''} — ${esc(voice.text)}</em><span>${esc(text)}</span></button>`;
+      })
+      .join('')}</div>
   </article>`;
 }
 
@@ -292,9 +351,9 @@ function officeScreen(app: AppState): string {
   const place = playerPlace(career);
   const foe = fixture ? teamById(career, opponentOf(fixture, team.id)) : null;
   const trade = tradeBlock(career);
-  const room = roomBlock(career);
   const plan = planBlock(career);
   return `<section class="desk week">
+    ${officeScene(career)}
     ${career.patchUnread ? `<article class="banner span-2"><div><p class="kicker">Patch ${esc(career.patchName)}</p><p>${career.patchNotes.map((line) => esc(line)).join(' ') || 'A quiet rift.'}</p></div><button class="btn" type="button" data-act="dismiss-patch">Noted</button></article>` : ''}
     <article class="matchup">
       <div>
@@ -318,7 +377,7 @@ function officeScreen(app: AppState): string {
       </dl>
     </article>
     ${plan}
-    ${room || trade ? `<div class="desk-rail span-2">${room}${trade}</div>` : ''}
+    ${trade ? `<div class="desk-rail span-2">${trade}</div>` : ''}
     ${awardBlock(career)}
     <div class="split span-2">
       <article class="panel">
@@ -332,7 +391,7 @@ function officeScreen(app: AppState): string {
     </div>
     <article class="panel how span-2">
       <h2>How a week works</h2>
-      <p>Lock one plan. It happens before the draft. Then ban, queue three, and play. The tape names the next week. The room and a trade call can change the plan, and both expire when the match is queued.</p>
+      <p>Someone speaks before the plan. Answer them if they ask, then lock one plan. It happens before the draft. Then ban, queue three, and play. The tape answers back. A trade call can still change the roster, and it expires when the match is queued.</p>
     </article>
     ${career.history.length ? `<article class="panel span-2"><h2>Previous seasons</h2><ul class="news">${career.history.map((season) => `<li>Season ${season.year}: ${season.wins}-${season.losses}, Cup ${esc(season.cup)}, Playoffs ${esc(season.playoff)}, MVP ${esc(season.mvp)}</li>`).join('')}</ul></article>` : ''}
     ${app.confirmAbandon ? '<button class="btn danger span-2" type="button" data-act="abandon">Confirm abandon career</button>' : '<button class="btn ghost span-2" type="button" data-act="ask-abandon">Abandon career</button>'}
@@ -382,6 +441,8 @@ function playerScreen(app: AppState): string {
       <div>
         <p class="kicker">${roleTag(player.role)} ${esc(TRAIT_COPY[player.trait].name)}</p>
         <h1>${esc(player.nick)}</h1>
+        <div class="link-rank">Link ${linkRank(career, player.id)} ${pips(linkRank(career, player.id))}</div>
+        <p class="line">${esc(confidantLine(career, player.id))}</p>
         <p>${esc(player.name)}, ${player.age}. ${esc(TRAIT_COPY[player.trait].text)}</p>
         <dl class="stats">
           <div><dt>Overall</dt><dd>${overall(player)}</dd></div>
@@ -397,13 +458,14 @@ function playerScreen(app: AppState): string {
         <p class="muted">The champion they queue in auto draft, and the one that gains extra mastery when they play it. Locked champions in the study also hit a little harder.</p>
         <div class="row wrap">${roleChamps(player.role).map((id) => `<button type="button" class="btn tiny ${player.study === id ? 'on' : ''}" data-act="study" data-id="${player.id}" data-champ="${id}">${esc(champName(id))}</button>`).join('')}</div>
         ${rosterIds(playerTeam(career)).includes(player.id) && career.stage.kind !== 'offseason' ? `<div class="row"><button class="btn ${career.promiseId === player.id ? 'on' : ''}" type="button" data-act="promise" data-id="${player.id}">${career.promiseId === player.id ? 'Pull the promise' : 'Promise the start'}</button></div>` : ''}
-        <h2>The room</h2>
+        <h2>Links</h2>
         <ul class="news">${rosterIds(playerTeam(career))
           .filter((id) => id !== player.id)
           .map((id) => {
             const bond = readTie(career, player.id, id);
             const word = bond >= 2 ? 'close' : bond === 1 ? 'easy' : bond === 0 ? 'neutral' : bond === -1 ? 'cool' : 'friction';
-            return `<li class="${bond > 0 ? 'streak-hot' : bond < 0 ? 'streak-cold' : ''}">${esc(career.players[id].nick)} · ${word}</li>`;
+            const rank = bond >= 2 ? 5 : bond === 1 ? 4 : bond === 0 ? 3 : bond === -1 ? 2 : 1;
+            return `<li class="${bond > 0 ? 'streak-hot' : bond < 0 ? 'streak-cold' : ''}">${esc(career.players[id].nick)} · ${word} ${pips(rank)}</li>`;
           })
           .join('')}</ul>
         <h2>Champion pool</h2>
@@ -509,6 +571,7 @@ function matchScreen(app: AppState): string {
       </div>
       ${bountyLine(career)}
     </header>
+    ${scene(career, draftSpeech(career), { slim: true })}
     <div class="split">
       <article class="panel">
         <h2>Scouting · ${esc(facilityAt(foe.facility).name)}</h2>
@@ -596,6 +659,7 @@ function resultScreen(app: AppState): string {
     <h1>${report.won === undefined ? 'Week complete' : report.won ? 'Victory' : 'Defeat'}${streakMark} ${report.scoreline ? esc(report.scoreline) : ''}</h1>
     <p>${report.opponentName ? `${report.home ? 'Home' : 'Away'} against ${esc(report.opponentName)}.` : ''} ${report.mvpName ? `${esc(report.mvpName)} takes MVP.` : ''}</p>
     <div class="pills"><span>${money(report.cashDelta)} cash</span><span>${report.fansDelta >= 0 ? '+' : ''}${report.fansDelta} fans</span>${report.bountyNote?.startsWith('Bounty cleared') ? '<span>Bounty paid</span>' : ''}</div>
+    ${scene(career, tapeSpeech(career, report))}
     <article class="panel pulse">
       <p class="kicker">${offseason ? 'The market' : 'Next week'}</p>
       <p class="hook-next">${esc(report.nextHook ?? 'The week is open.')}</p>

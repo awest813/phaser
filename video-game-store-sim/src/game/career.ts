@@ -1159,14 +1159,14 @@ function applyRoom(career: Career, side: 'a' | 'b'): void {
       first.morale = clamp(first.morale + 6, 5, 100);
       second.morale = clamp(second.morale - 5, 5, 100);
       shiftTie(career, first.id, second.id, -1);
-      career.roomEcho = `${first.nick} got the block. ${second.nick} will remember it.`;
+      career.roomEcho = `I got the block. ${second.nick} will remember it.`;
     } else {
       first.morale = clamp(first.morale + 3, 5, 100);
       second.morale = clamp(second.morale + 3, 5, 100);
       first.fatigue = clamp(first.fatigue + 3, 0, 100);
       second.fatigue = clamp(second.fatigue + 3, 0, 100);
       shiftTie(career, first.id, second.id, 1);
-      career.roomEcho = `${first.nick} and ${second.nick} split the block. The edge between them softens.`;
+      career.roomEcho = 'We split the block. The edge between us can soften.';
     }
   } else if (room.kind === 'promise' && first) {
     if (side === 'a') {
@@ -1176,45 +1176,45 @@ function applyRoom(career: Career, side: 'a' | 'b'): void {
       }
       career.promiseId = first.id;
       first.morale = clamp(first.morale + 3, 5, 100);
-      career.roomEcho = `${first.nick} has this series if you queue them.`;
+      career.roomEcho = 'This series is mine if you queue me.';
     } else {
       first.morale = clamp(first.morale - 4, 5, 100);
       const leader = rosterIds(team).find((id) => career.players[id].trait === 'leader' && id !== first.id);
       if (leader) shiftTie(career, first.id, leader, -1);
-      career.roomEcho = `${first.nick} asked for the series and heard no.`;
+      career.roomEcho = 'I asked for the series. You said no.';
     }
   } else if (room.kind === 'rest' && first) {
     if (side === 'a') {
       first.fatigue = clamp(first.fatigue - 16, 0, 100);
       first.morale = clamp(first.morale + 2, 5, 100);
       if (career.promiseId === first.id) career.promiseId = null;
-      career.roomEcho = `${first.nick} spends the block off the PC.`;
+      career.roomEcho = 'I am off the PC. The wrist gets the block.';
     } else {
       first.fatigue = clamp(first.fatigue + 5, 0, 100);
       first.morale = clamp(first.morale + 3, 5, 100);
-      career.roomEcho = `${first.nick} pushes through the fatigue.`;
+      career.roomEcho = 'I will play through the fatigue.';
     }
   } else if (room.kind === 'study' && first && room.champId) {
     if (side === 'a') {
       first.study = room.champId;
       bumpMastery(first, room.champId, 4);
       first.morale = clamp(first.morale + 3, 5, 100);
-      career.roomEcho = `${first.nick} spends the week on ${champName(room.champId)}.`;
+      career.roomEcho = `I am on ${champName(room.champId)} this week.`;
     } else {
       first.morale = clamp(first.morale - 3, 5, 100);
       first.form = clamp(first.form - 1, -10, 10);
-      career.roomEcho = `${first.nick} stays on ${champName(first.study)}.`;
+      career.roomEcho = `I will stay on ${champName(first.study)}.`;
     }
   } else if (room.kind === 'film' && first) {
     if (side === 'a') {
       team.fans += 60;
       first.fatigue = clamp(first.fatigue + 8, 0, 100);
       first.morale = clamp(first.morale + 4, 5, 100);
-      career.roomEcho = `${first.nick} streams the garage. A few more people know the tag.`;
+      career.roomEcho = 'I am streaming the garage. A few more people will know the tag.';
     } else {
       team.chemistry = clamp(team.chemistry + 2, 15, 100);
       first.morale = clamp(first.morale + 2, 5, 100);
-      career.roomEcho = 'The stream stays off. The house gets the hour.';
+      career.roomEcho = 'Fine. The house gets the hour, and so do I.';
     }
   }
   if (career.roomEcho) pushNews(career, career.roomEcho);
@@ -1445,7 +1445,7 @@ export function playCurrentWeek(career: Career): Career {
   if (next.room && !next.roomSpent) {
     const ignored = next.players[next.room.ids[0]];
     if (ignored) ignored.morale = clamp(ignored.morale - 4, 5, 100);
-    next.roomEcho = ignored ? `${ignored.nick} wanted a word before the match. You walked past them.` : 'The room was left alone.';
+    next.roomEcho = ignored ? 'You walked past me. I still wanted that word.' : 'The room was left alone.';
     next.roomSpent = true;
     pushNews(next, next.roomEcho);
   }

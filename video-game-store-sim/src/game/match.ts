@@ -84,7 +84,7 @@ export function bestChampFor(career: Career, playerId: string, blocked: Set<stri
     if (blocked.has(champion.id)) continue;
     const mastery = player.mastery[champion.id] ?? 8;
     const meta = champion.base + (career.patch[champion.id] ?? 0);
-    const score = mastery * 0.9 + meta * 0.35 + (player.role === champion.role ? 14 : 0) + (player.study === champion.id ? 8 : 0);
+    const score = mastery * 0.9 + meta * 0.35 + (player.role === champion.role ? 14 : 0) + (player.study === champion.id ? 22 : 0);
     if (score > bestScore) {
       bestScore = score;
       best = champion.id;

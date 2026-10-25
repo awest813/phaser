@@ -98,7 +98,7 @@ export function suggestBan(career: Career, starterIds: string[]): string {
   for (const id of starterIds) {
     const player = career.players[id];
     for (const [champId, value] of Object.entries(player.mastery)) {
-      if (value >= 70) loved.add(champId);
+      if (value >= 70 || champId === player.study) loved.add(champId);
     }
   }
   const ranked = [...CHAMPIONS].sort(

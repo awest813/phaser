@@ -19,7 +19,7 @@ import {
 } from './game/career.ts';
 import { apply, initialApp } from './game/actions.ts';
 import { FACILITIES } from './game/facilities.ts';
-import { bestChampFor, describeWeek, lineupProblems } from './game/match.ts';
+import { bestChampFor, describeWeek, lineupProblems, suggestBan } from './game/match.ts';
 import { CHAMPIONS } from './game/champions.ts';
 import { overall } from './game/roster.ts';
 import { doubleRoundRobin } from './game/schedule.ts';
@@ -119,6 +119,7 @@ function run(): void {
   const studied = setStudy(app.career, 'kite', 'artemis');
   assert(studied.career.players.kite.study === 'artemis', 'study');
   assert(bestChampFor(studied.career, 'kite', new Set()) === 'artemis', 'study changes the auto draft');
+  assert(suggestBan(studied.career, ['mina', 'kite', 'veil']) !== 'artemis', 'study is not banned by us');
   const offRole = setStudy(app.career, 'kite', 'athena');
   assert(offRole.error, 'study role');
   const answered = chooseRoom(app.career, 'a');

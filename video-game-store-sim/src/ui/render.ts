@@ -63,9 +63,9 @@ function money(value: number): string {
   return `${sign}$${Math.abs(Math.round(value)).toLocaleString('en-US')}`;
 }
 
-function bar(value: number, max = 100): string {
+function bar(value: number, max = 100, tone = ''): string {
   const width = Math.max(0, Math.min(100, (value / max) * 100));
-  return `<span class="bar"><span style="width:${width.toFixed(1)}%"></span></span>`;
+  return `<span class="bar ${tone}"><span style="width:${width.toFixed(1)}%"></span></span>`;
 }
 
 function art(src: string, label: string, className = ''): string {
@@ -112,9 +112,9 @@ function createScreen(app: AppState): string {
       <h1>Start in the garage.</h1>
       <p>You inherit four players and two prospects. The main roster queues three. The development pair is there when someone breaks.</p>
       ${app.career ? '<p class="warn">Starting over replaces the saved career.</p>' : ''}
-      <label>Organization<input data-field="name" maxlength="24" value="${esc(draft.name)}" /></label>
-      <label>Tag<input data-field="tag" maxlength="3" value="${esc(draft.tag)}" /></label>
-      <label>City<input data-field="city" maxlength="20" value="${esc(draft.city)}" /></label>
+      <label>Organization<input id="org-name" name="name" data-field="name" maxlength="24" value="${esc(draft.name)}" /></label>
+      <label>Tag<input id="org-tag" name="tag" data-field="tag" maxlength="3" value="${esc(draft.tag)}" /></label>
+      <label>City<input id="org-city" name="city" data-field="city" maxlength="20" value="${esc(draft.city)}" /></label>
       <div class="swatches">${ORG_COLORS.map((color) => `<button type="button" class="swatch ${color.hex === draft.color ? 'on' : ''}" style="--swatch:${color.hex}" data-act="color" data-color="${color.hex}" aria-label="${esc(color.name)}"></button>`).join('')}</div>
       <div class="row">
         <button class="btn primary" type="button" data-act="begin">${app.career ? 'Replace and begin' : 'Begin season 1'}</button>
@@ -153,11 +153,11 @@ function shell(app: AppState, content: string): string {
     </aside>
     <div class="main">
       <header class="topbar">
-        <div><span class="kicker">${esc(phaseLabel(career))}</span><strong>${esc(describeWeek(career)?.label ?? 'Offseason')}</strong></div>
-        <div class="pills">
-          <span>${money(team.cash)}</span>
-          <span>${team.fans.toLocaleString('en-US')} fans</span>
-          <span>${facilityAt(team.facility).name}</span>
+        <div class="phase"><span class="kicker">${esc(phaseLabel(career))}</span><strong>${esc(describeWeek(career)?.label ?? 'Offseason')}</strong></div>
+        <div class="meters">
+          <div class="meter"><span>Cash</span><strong>${money(team.cash)}</strong></div>
+          <div class="meter"><span>Fans</span><strong>${team.fans.toLocaleString('en-US')}</strong></div>
+          <div class="meter"><span>House</span><strong>${esc(facilityAt(team.facility).name)}</strong></div>
         </div>
       </header>
       ${notice(app)}
@@ -206,7 +206,7 @@ function practiceBlock(career: Career): string {
   return `<article class="panel">
     <h2>Practice block</h2>
     <p>One block before the match. A house set raises chemistry and tires everyone. A circuit scrim pays a little, tires both lineups, and puts their habit on the whiteboard.</p>
-    <div class="row wrap">
+    <div class="scrim-row">
       <button class="btn" type="button" data-act="scrim-house">House block</button>
       ${foes.map((team) => `<button class="btn" type="button" data-act="scrim-circuit" data-id="${team.id}">Scrim ${esc(team.tag)}</button>`).join('')}
     </div>
@@ -232,7 +232,7 @@ function tradeBlock(career: Career): string {
 
 function awardBlock(career: Career): string {
   if (!career.awards.length) return '';
-  return `<article class="panel"><h2>Season ${career.awards[0].year} awards</h2><ul class="news">${career.awards.map((award) => `<li>${esc(award.title)}: ${esc(award.playerName)} (${esc(teamById(career, award.teamId).tag)}) · ${esc(award.detail)}</li>`).join('')}</ul></article>`;
+  return `<article class="panel span-2"><h2>Season ${career.awards[0].year} awards</h2><ul class="news">${career.awards.map((award) => `<li>${esc(award.title)}: ${esc(award.playerName)} (${esc(teamById(career, award.teamId).tag)}) · ${esc(award.detail)}</li>`).join('')}</ul></article>`;
 }
 
 function officeScreen(app: AppState): string {
@@ -244,9 +244,11 @@ function officeScreen(app: AppState): string {
   const standing = playerStanding(career);
   const place = playerPlace(career);
   const foe = fixture ? teamById(career, opponentOf(fixture, team.id)) : null;
-  return `<section class="stack">
-    ${career.patchUnread ? `<article class="banner"><div><p class="kicker">Patch ${esc(career.patchName)}</p><p>${career.patchNotes.map((line) => esc(line)).join(' ') || 'A quiet rift.'}</p></div><button class="btn" type="button" data-act="dismiss-patch">Noted</button></article>` : ''}
-    <article class="hero-card">
+  const practice = practiceBlock(career);
+  const trade = tradeBlock(career);
+  return `<section class="desk">
+    ${career.patchUnread ? `<article class="banner span-2"><div><p class="kicker">Patch ${esc(career.patchName)}</p><p>${career.patchNotes.map((line) => esc(line)).join(' ') || 'A quiet rift.'}</p></div><button class="btn" type="button" data-act="dismiss-patch">Noted</button></article>` : ''}
+    <article class="matchup">
       <div>
         <p class="kicker">${foe ? (fixture?.homeId === team.id ? 'Home' : 'Away') : 'No match'}</p>
         <h1>${foe ? `vs ${esc(foe.name)}` : career.stage.kind === 'offseason' ? 'The season is over' : 'Open week'}</h1>
@@ -263,26 +265,25 @@ function officeScreen(app: AppState): string {
         <div><dt>Payroll</dt><dd>${money(payroll(career))}</dd></div>
       </dl>
     </article>
-    ${practiceBlock(career)}
-    ${tradeBlock(career)}
+    ${practice || trade ? `<div class="desk-rail">${practice}${trade}</div>` : ''}
     ${awardBlock(career)}
-    <div class="split">
+    <div class="split span-2">
       <article class="panel">
         <h2>Season goals</h2>
         <ul class="goals">${career.goals.map((goal) => `<li class="${goal.done ? 'done' : ''}">${esc(goal.text)}</li>`).join('')}</ul>
       </article>
       <article class="panel">
         <h2>Wire</h2>
-        <ul class="news">${career.news.map((item) => `<li>${esc(item.text)}</li>`).join('') || '<li>The garage is quiet.</li>'}</ul>
+        <ul class="news">${career.news.slice(0, 6).map((item) => `<li>${esc(item.text)}</li>`).join('') || '<li>The garage is quiet.</li>'}</ul>
       </article>
     </div>
-    <article class="panel how">
+    <article class="panel how span-2">
       <h2>How a week works</h2>
       <p>Spend the practice block on a house set or a circuit scrim, then set training. On match day, ban one champion, queue three players, lock their champions, and pick a plan. Trade calls expire when the match is queued. Development players can be called up when a starter is tired or hurt.</p>
       ${week ? '' : ''}
     </article>
-    ${career.history.length ? `<article class="panel"><h2>Previous seasons</h2><ul class="news">${career.history.map((season) => `<li>Season ${season.year}: ${season.wins}-${season.losses}, Cup ${esc(season.cup)}, Playoffs ${esc(season.playoff)}, MVP ${esc(season.mvp)}</li>`).join('')}</ul></article>` : ''}
-    ${app.confirmAbandon ? '<button class="btn danger" type="button" data-act="abandon">Confirm abandon career</button>' : '<button class="btn ghost tiny" type="button" data-act="ask-abandon">Abandon career</button>'}
+    ${career.history.length ? `<article class="panel span-2"><h2>Previous seasons</h2><ul class="news">${career.history.map((season) => `<li>Season ${season.year}: ${season.wins}-${season.losses}, Cup ${esc(season.cup)}, Playoffs ${esc(season.playoff)}, MVP ${esc(season.mvp)}</li>`).join('')}</ul></article>` : ''}
+    ${app.confirmAbandon ? '<button class="btn danger span-2" type="button" data-act="abandon">Confirm abandon career</button>' : '<button class="btn ghost span-2" type="button" data-act="ask-abandon">Abandon career</button>'}
   </section>`;
 }
 
@@ -295,13 +296,13 @@ function rosterScreen(app: AppState): string {
     <article class="panel">
       <h2>This week's training</h2>
       <div class="choice">${TRAINING.map((focus) => `<button type="button" class="${team.training === focus.id ? 'on' : ''}" data-act="training" data-focus="${focus.id}"><strong>${focus.name}</strong><span>${focus.text}</span></button>`).join('')}</div>
-      ${team.training === 'champion' ? `<label class="inline">Champion<select data-act="training-champ">${CHAMPIONS.map((champion) => `<option value="${champion.id}" ${team.trainingChamp === champion.id ? 'selected' : ''}>${esc(champion.name)}</option>`).join('')}</select></label>` : ''}
+      ${team.training === 'champion' ? `<label class="inline">Champion<select id="training-champ" name="champion" data-act="training-champ">${CHAMPIONS.map((champion) => `<option value="${champion.id}" ${team.trainingChamp === champion.id ? 'selected' : ''}>${esc(champion.name)}</option>`).join('')}</select></label>` : ''}
       ${team.facility < 4 && team.training === 'academy' ? '<p class="warn">Prospects are still on leftover PCs. The Academy Wing is where this focus starts to matter.</p>' : ''}
     </article>
     <h2>Main roster</h2>
-    <div class="roster-grid">${team.main.map((id) => playerCard(career, id, team.dev)).join('')}</div>
+    <div class="roster-grid main">${team.main.map((id) => playerCard(career, id, team.dev)).join('')}</div>
     <h2>Development team</h2>
-    <div class="roster-grid">${team.dev.map((id) => playerCard(career, id, team.main)).join('')}</div>
+    <div class="roster-grid dev">${team.dev.map((id) => playerCard(career, id, team.main)).join('')}</div>
   </section>`;
 }
 
@@ -310,13 +311,12 @@ function playerCard(career: Career, id: string, swapWith: string[]): string {
   const best = bestMasteryId(player);
   return `<article class="player-card">
     <button class="portrait-btn" type="button" data-act="select-player" data-id="${id}">${art(player.portrait, player.nick)}</button>
+    <div class="ovr-badge">${overall(player)}<small>OVR</small></div>
     <div class="player-body">
       <div class="row spread"><strong>${esc(player.nick)}</strong>${roleTag(player.role)}</div>
       <span class="muted">${esc(player.name)} · ${player.age}</span>
-      <div class="ovr">${overall(player)}<small>OVR</small></div>
       <p>${esc(TRAIT_COPY[player.trait].name)} · ${esc(champName(best))} ${player.mastery[best] ?? 0}</p>
-      <label>Morale ${Math.round(player.morale)} ${bar(player.morale)}</label>
-      <label>Fatigue ${Math.round(player.fatigue)} ${bar(player.fatigue)}</label>
+      <div class="meters-mini"><span>Morale ${Math.round(player.morale)}</span>${bar(player.morale)}<span>Fatigue ${Math.round(player.fatigue)}</span>${bar(player.fatigue, 100, 'fatigue')}</div>
       <span class="muted">${player.contractStatus === 'expiring' ? 'Contract expired' : `${player.contractYears}y · ${money(player.salary)}/wk`}${player.injured ? ` · out ${player.injured}` : ''}</span>
       <div class="row wrap">${swapWith.map((other) => `<button class="btn tiny" type="button" data-act="swap" data-a="${id}" data-b="${other}">Swap ${esc(career.players[other].nick)}</button>`).join('')}</div>
     </div>
@@ -437,7 +437,7 @@ function matchScreen(app: AppState): string {
     edge = edgeLabel(yoursPower.total - oppPower.total);
   }
   const foeRecord = standingsFor(career, 'regular').find((row) => row.teamId === foe.id);
-  return `<section class="stack">
+  return `<section class="stack draft">
     <header class="section-head">
       <h1>${esc(foe.name)}</h1>
       <p>${fixture.homeId === team.id ? 'Home' : 'Away'} on Spire Rift — one lane, Ash Path, Mirror Path, and the Worldheart pit. Series length ${fixture.series === 1 ? 'one game' : `best of ${fixture.series}`}.</p>
@@ -489,9 +489,9 @@ function matchScreen(app: AppState): string {
       <h2>Strategy</h2>
       <div class="choice">${STRATEGIES.map((strategy) => `<button type="button" class="${career.lineup.strategy === strategy.id ? 'on' : ''}" data-act="strategy" data-strategy="${strategy.id}"><strong>${strategy.name}</strong><span>${strategy.text}</span></button>`).join('')}</div>
     </article>
-    <div class="row">
-      <button class="btn primary" type="button" data-act="play">Queue the match</button>
+    <div class="queue">
       <button class="btn" type="button" data-act="autofill">Auto draft</button>
+      <button class="btn primary" type="button" data-act="play">Queue the match</button>
     </div>
   </section>`;
 }
@@ -519,7 +519,8 @@ function resultScreen(app: AppState): string {
   const report = career?.lastReport;
   if (!career || !report) return `<section class="stack"><h1>No result</h1></section>`;
   const kind = kindLabel(report.kind);
-  return `<section class="stack">
+  const tone = report.won === undefined ? '' : report.won ? 'win' : 'loss';
+  return `<section class="stack scoreboard ${tone}">
     <p class="kicker">${esc(report.label)} · ${esc(kind)}</p>
     <h1>${report.won === undefined ? 'Week complete' : report.won ? 'Victory' : 'Defeat'} ${report.scoreline ? esc(report.scoreline) : ''}</h1>
     <p>${report.opponentName ? `${report.home ? 'Home' : 'Away'} against ${esc(report.opponentName)}.` : ''} ${report.mvpName ? `${esc(report.mvpName)} takes MVP.` : ''}</p>
@@ -565,11 +566,11 @@ function standingsTab(career: Career): string {
   const rows = standingsFor(career, 'regular');
   const rank = rankTeams(career);
   return `<article class="panel"><h1>Regular season</h1><p>Top six reach the playoffs. Seeds 1 and 2 get a bye. The Spire Cup is a separate table.</p>
-    <table><thead><tr><th></th><th>Team</th><th>W</th><th>L</th><th>Diff</th><th>Facility</th></tr></thead><tbody>
+    <table><thead><tr><th></th><th>Team</th><th class="num">W</th><th class="num">L</th><th class="num">Diff</th><th>Facility</th></tr></thead><tbody>
     ${rank.map((id, index) => {
       const team = teamById(career, id);
       const row = rows.find((entry) => entry.teamId === id);
-      return `<tr class="${index === 5 ? 'cut' : ''} ${team.player ? 'you' : ''}"><td>${index + 1}</td><td><button type="button" data-act="view-team" data-id="${id}">${esc(team.name)}</button></td><td>${row?.wins ?? 0}</td><td>${row?.losses ?? 0}</td><td>${row?.diff ?? 0}</td><td>${esc(facilityAt(team.facility).name)}</td></tr>`;
+      return `<tr class="${index === 5 ? 'cut' : ''} ${team.player ? 'you' : ''}"><td>${index + 1}</td><td><button type="button" data-act="view-team" data-id="${id}">${esc(team.name)}</button></td><td class="num">${row?.wins ?? 0}</td><td class="num">${row?.losses ?? 0}</td><td class="num">${row?.diff ?? 0}</td><td>${esc(facilityAt(team.facility).name)}</td></tr>`;
     }).join('')}
     </tbody></table></article>`;
 }
@@ -730,6 +731,6 @@ function freeAgentCard(career: Career, id: string): string {
     <span>${esc(player.name)} · ${player.age} · ${ROLE_LABEL[player.role]}</span>
     <span>${overall(player)} OVR · pot ${player.potential} · ${money(player.salary)}/wk</span>
     <span class="muted">${esc(champName(bestMasteryId(player)))} · ${esc(TRAIT_COPY[player.trait].name)}</span>
-    ${blocked ? '<p class="warn">Needs a performance center.</p>' : `<div class="row wrap">${['main', 'dev'].flatMap((side) => [1, 2, 3].map((years) => `<button class="btn tiny" type="button" data-act="sign" data-id="${id}" data-side="${side}" data-years="${years}">${side === 'main' ? 'Main' : 'Dev'} ${years}y</button>`)).join('')}</div>`}
+    ${blocked ? '<p class="warn">Needs a performance center.</p>' : `<div class="row wrap free-actions">${['main', 'dev'].flatMap((side) => [1, 2, 3].map((years) => `<button class="btn tiny" type="button" data-act="sign" data-id="${id}" data-side="${side}" data-years="${years}">${side === 'main' ? 'Main' : 'Dev'} ${years}y</button>`)).join('')}</div>`}
   </div></article>`;
 }

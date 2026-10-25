@@ -11,6 +11,7 @@ import {
   raceLine,
   rankTeams,
   rosterIds,
+  lockPlan,
   rosterReady,
   runCircuitScrim,
   runHouseScrim,
@@ -107,7 +108,20 @@ function run(): void {
   assert(app.career.rivalId === 'iron', 'rival');
   assert(app.career.rivalHeat >= 12, 'rival heat');
   assert(raceLine(app.career).length > 8, 'race line');
+  assert(app.career.plan === null, 'week starts on the plan');
   assert(app.career.room && app.career.room.a.label.length > 2, 'opening room');
+  const studiedPlan = lockPlan(structuredClone(app.career), 'study');
+  assert(!studiedPlan.error && studiedPlan.career.plan === 'study', studiedPlan.error ?? 'study plan');
+  assert(studiedPlan.career.players.kite.mastery.skadi > app.career.players.kite.mastery.skadi, 'study moved mastery');
+  assert(lockPlan(studiedPlan.career, 'rest').error, 'plan locks once');
+  const rested = lockPlan(structuredClone(app.career), 'rest');
+  assert(!rested.error && rested.career.players.kite.fatigue < app.career.players.kite.fatigue, rested.error ?? 'rest plan');
+  const scrimmed = lockPlan(structuredClone(app.career), 'scrim');
+  assert(!scrimmed.error && scrimmed.career.plan === 'scrim' && scrimmed.career.lastScrim?.kind === 'circuit', scrimmed.error ?? 'scrim plan');
+  assert(scrimmed.career.intel[scrimmed.career.lastScrim?.opponentId ?? ''], 'scrim plan intel');
+  const plannedWeek = playCurrentWeek(autofill(studiedPlan.career));
+  assert(plannedWeek.plan === null, 'plan clears after the match');
+  assert((plannedWeek.lastReport?.planNote ?? '').includes('Study'), 'plan on the tape');
   assert(app.career.players.kite.study === 'skadi', 'kite studies skadi');
   assert(app.career.ties['boom|kite'] === -2, 'slayer friction');
   const promised = setPromise(structuredClone(app.career), 'wolf');

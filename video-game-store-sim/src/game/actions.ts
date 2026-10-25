@@ -5,6 +5,7 @@ import {
   createCareer,
   declineTrade,
   lineupProblems,
+  lockPlan,
   playCurrentWeek,
   releasePlayer,
   resignPlayer,
@@ -19,7 +20,7 @@ import {
   upgradeFacility
 } from './career.ts';
 import { autofillLineup } from './match.ts';
-import type { Action, AppState, Screen, Training } from './types.ts';
+import type { Action, AppState, Screen, Training, WeekPlan } from './types.ts';
 
 const CAREER_SCREENS: Screen[] = [
   'office',
@@ -88,7 +89,14 @@ export function apply(app: AppState, action: Action): AppState {
       return next;
     }
     if (!career && action.screen !== 'create') return app;
-    if (action.screen === 'match' && career) next.career = autofillIfEmpty(career);
+    if (action.screen === 'match' && career) {
+      if (career.stage.kind !== 'offseason' && !career.plan) {
+        next.notice = 'Lock a plan before the draft.';
+        next.screen = 'office';
+        return next;
+      }
+      next.career = autofillIfEmpty(career);
+    }
     if (action.screen === 'offseason' && career?.stage.kind !== 'offseason') {
       next.notice = 'The offseason opens when the season ends.';
       return next;
@@ -198,6 +206,11 @@ export function apply(app: AppState, action: Action): AppState {
     return next;
   }
   if (action.type === 'play') {
+    if (!career.plan) {
+      next.notice = 'Lock a plan before the draft.';
+      next.screen = 'office';
+      return next;
+    }
     const problems = lineupProblems(career);
     if (problems.length) {
       next.notice = problems[0];
@@ -301,6 +314,13 @@ export function apply(app: AppState, action: Action): AppState {
     next.screen = 'office';
     return next;
   }
+  if (action.type === 'plan') {
+    const result = lockPlan(career, action.plan);
+    next.career = result.career;
+    next.notice = result.error ?? 'Plan locked. The draft is open.';
+    next.screen = 'office';
+    return next;
+  }
   if (action.type === 'room') {
     const result = chooseRoom(career, action.side);
     next.career = result.career;
@@ -334,4 +354,8 @@ function autofillIfEmpty(career: AppState['career']): AppState['career'] {
 
 export function isTraining(value: string): value is Training {
   return ['mechanics', 'macro', 'synergy', 'champion', 'rest', 'academy'].includes(value);
+}
+
+export function isPlan(value: string): value is WeekPlan {
+  return value === 'scrim' || value === 'house' || value === 'study' || value === 'rest';
 }

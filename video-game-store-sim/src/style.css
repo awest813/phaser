@@ -121,7 +121,7 @@ p { line-height: 1.45; }
 .brand strong { font-size: 1rem; }
 .brand em { color: var(--muted); font-style: normal; font-size: 0.82rem; }
 .side nav { display: flex; flex-direction: column; gap: 0.15rem; }
-.side nav button, .filters button, .choice button, .btn {
+.side nav button, .filters button, .choice button, .plan-grid button, .btn {
   border: 1px solid transparent;
   background: transparent;
   border-radius: 12px;
@@ -202,9 +202,14 @@ p { line-height: 1.45; }
 }
 .desk > .span-2,
 .desk:not(:has(.desk-rail)) > .matchup { grid-column: 1 / -1; }
+.desk.week { grid-template-columns: 1fr; }
+.desk.week > .matchup,
+.desk.week > .span-2,
+.desk.week > .desk-rail { grid-column: auto; }
+.desk.week .desk-rail { grid-template-columns: 1fr 1fr; align-items: start; }
 .desk-rail { display: grid; gap: 1rem; }
 
-.btn, .filters button, .choice button {
+.btn, .filters button, .choice button, .plan-grid button {
   border: 1px solid var(--line);
   background: #171c27;
 }
@@ -217,10 +222,30 @@ p { line-height: 1.45; }
 .btn.danger { background: #6d2430; border-color: #e36b6b; }
 .btn.ghost { background: transparent; }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.beats { display: flex; gap: 0.35rem; margin-top: 0.45rem; }
+.beats span {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.15rem 0.55rem;
+  color: var(--muted);
+  font-size: 0.68rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.beats span.on { color: var(--gold); border-color: color-mix(in srgb, var(--gold) 55%, var(--line)); }
+.plan-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.6rem; }
+.plan-grid button {
+  text-align: left;
+  min-height: 8.5rem;
+  border-radius: 14px;
+  padding: 0.85rem 0.9rem;
+}
+.plan-grid button strong { display: block; margin-bottom: 0.35rem; }
+.plan-locked .btn { margin-top: 0.4rem; }
 .choice { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.55rem; }
 .choice.room-choice { grid-template-columns: 1fr 1fr; }
 .choice button { min-height: 4.6rem; }
-.choice button span, .champ-meta em, .slot em { display: block; color: var(--muted); font-size: 0.8rem; font-weight: 400; }
+.choice button span, .plan-grid button span, .champ-meta em, .slot em { display: block; color: var(--muted); font-size: 0.8rem; font-weight: 400; }
 .filters { display: flex; flex-wrap: wrap; gap: 0.4rem; }
 .filters button { border-radius: 999px; padding: 0.4rem 0.8rem; }
 .filters button.on { background: var(--gold); color: #24190c; border-color: transparent; }
@@ -413,7 +438,7 @@ tr.in td { color: var(--ok); }
 @media (max-width: 1100px) {
   .roster-grid.main { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .facility-path { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .choice { grid-template-columns: 1fr 1fr; }
+  .choice, .plan-grid { grid-template-columns: 1fr 1fr; }
 }
 
 @media (max-width: 980px) {

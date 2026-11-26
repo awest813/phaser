@@ -284,9 +284,11 @@ function scene(career: Career, speech: Speech, opts: { date?: boolean; replies?:
 }
 
 function officeScene(career: Career): string {
-  const asking = career.room && !career.roomSpent ? roomSpeech(career) : null;
-  const speech = asking ?? morningLine(career);
-  return scene(career, speech, { date: true, replies: asking ? career.room : null });
+  if (career.plan) return scene(career, morningLine(career), { date: true });
+  const talk = roomSpeech(career);
+  if (talk && career.room && !career.roomSpent) return scene(career, talk, { date: true, replies: career.room });
+  if (talk && career.roomSpent) return scene(career, talk, { date: true });
+  return scene(career, morningLine(career), { date: true });
 }
 
 function planBlock(career: Career): string {

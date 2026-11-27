@@ -236,6 +236,7 @@ html, body { overflow-x: clip; }
   text-transform: uppercase;
 }
 .beats span.on { color: #24190c; background: var(--gold); border-color: transparent; }
+.beats span.now { color: var(--gold); border-color: var(--gold); }
 .plan-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.7rem; }
 .plan-grid button {
   text-align: left;
@@ -271,7 +272,7 @@ html, body { overflow-x: clip; }
   aspect-ratio: auto;
   border-radius: 18px 0 0 18px;
 }
-.scene .art span { display: none; }
+.scene .art span, .portrait-btn .art span, .detail .art span, .champ-card .art span, .slot .art span, .ban .art span { display: none; }
 .scene.slim { grid-template-columns: 148px minmax(0, 1fr); }
 .scene.slim .bust .art { min-height: 168px; }
 .scene.slim p.line { font-size: 1.08rem; }
@@ -471,7 +472,9 @@ th, td { text-align: left; padding: 0.55rem 0.4rem; border-bottom: 1px solid rgb
 th { color: var(--muted); font-size: 0.72rem; letter-spacing: 0.1em; text-transform: uppercase; font-weight: 600; }
 td button { background: none; border: 0; padding: 0; color: var(--ink); font-weight: 650; }
 tr.you { background: color-mix(in srgb, var(--org) 14%, transparent); }
-tr.you td button { color: var(--gold); }
+tr.you td button, tr.foe td button { color: var(--gold); }
+tr.foe td:first-child { box-shadow: inset 3px 0 0 var(--gold); }
+.schedule li.now strong { color: var(--gold); }
 tr.cut td { box-shadow: inset 0 2px 0 var(--gold); }
 tr.in td { color: var(--ok); }
 .num { text-align: right; font-variant-numeric: tabular-nums; }

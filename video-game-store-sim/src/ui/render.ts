@@ -165,9 +165,13 @@ function shell(app: AppState, content: string): string {
 function weekBeats(app: AppState): string {
   const career = app.career;
   if (!career || career.stage.kind === 'offseason') return '';
-  const planOn = !!career.plan || app.screen === 'match' || app.screen === 'result';
-  const tapeOn = app.screen === 'result';
-  return `<div class="beats"><span class="on">1 Plan</span><span class="${planOn ? 'on' : ''}">2 Draft</span><span class="${tapeOn ? 'on' : ''}">3 Tape</span></div>`;
+  const planned = !!career.plan;
+  const onMatch = app.screen === 'match';
+  const onTape = app.screen === 'result';
+  const planClass = planned || onMatch || onTape ? 'on' : 'now';
+  const draftClass = onTape || onMatch ? 'on' : planned ? 'now' : '';
+  const tapeClass = onTape ? 'on' : '';
+  return `<div class="beats"><span class="${planClass}">1 Plan</span><span class="${draftClass}">2 Draft</span><span class="${tapeClass}">3 Tape</span></div>`;
 }
 
 function streakMeter(streak: number): string {
@@ -399,7 +403,7 @@ function rosterScreen(app: AppState): string {
   if (!career) return '';
   const team = playerTeam(career);
   return `<section class="stack">
-    <header class="section-head"><h1>Roster</h1><p>Four on the main roster. Two in development. Study champions and start promises live on the player page. The week's plan is locked from the office.</p></header>
+    <header class="section-head"><h1>Roster</h1></header>
     <h2>Main roster</h2>
     <div class="roster-grid main">${team.main.map((id) => playerCard(career, id, team.dev)).join('')}</div>
     <h2>Development team</h2>
@@ -407,9 +411,19 @@ function rosterScreen(app: AppState): string {
   </section>`;
 }
 
+function rosterNote(career: Career, player: Player): string {
+  if (player.injured) return `Out ${player.injured}`;
+  if (career.promiseId === player.id) return 'Promised the start';
+  if (player.sat >= 2) return 'Wants minutes';
+  const best = bestMasteryId(player);
+  if (player.study && player.study !== best) return `Studying ${champName(player.study)}`;
+  return '';
+}
+
 function playerCard(career: Career, id: string, swapWith: string[]): string {
   const player = career.players[id];
   const best = bestMasteryId(player);
+  const note = rosterNote(career, player);
   return `<article class="player-card">
     <button class="portrait-btn" type="button" data-act="select-player" data-id="${id}">${art(player.portrait, player.nick)}</button>
     <div class="ovr-badge">${overall(player)}<small>OVR</small></div>
@@ -417,9 +431,9 @@ function playerCard(career: Career, id: string, swapWith: string[]): string {
       <div class="row spread"><strong>${esc(player.nick)}</strong>${roleTag(player.role)}</div>
       <span class="muted">${esc(player.name)} · ${player.age}</span>
       <p>${esc(TRAIT_COPY[player.trait].name)} · ${esc(champName(best))} ${player.mastery[best] ?? 0}</p>
-      <p class="muted">Studying ${esc(champName(player.study || best))}${career.promiseId === id ? ' · promised the start' : ''}${player.sat >= 2 ? ' · wants minutes' : ''}</p>
+      ${note ? `<p class="scrim-note">${esc(note)}</p>` : ''}
       <div class="meters-mini"><span>Morale ${Math.round(player.morale)}</span>${bar(player.morale)}<span>Fatigue ${Math.round(player.fatigue)}</span>${bar(player.fatigue, 100, 'fatigue')}</div>
-      <span class="muted">${player.contractStatus === 'expiring' ? 'Contract expired' : `${player.contractYears}y · ${money(player.salary)}/wk`}${player.injured ? ` · out ${player.injured}` : ''}</span>
+      <span class="muted">${player.contractStatus === 'expiring' ? 'Contract expired' : `${player.contractYears}y · ${money(player.salary)}/wk`}</span>
       <div class="row wrap">${swapWith.map((other) => `<button class="btn tiny" type="button" data-act="swap" data-a="${id}" data-b="${other}">Swap ${esc(career.players[other].nick)}</button>`).join('')}</div>
     </div>
   </article>`;
@@ -432,13 +446,8 @@ function playerScreen(app: AppState): string {
   const masteries = Object.entries(player.mastery).sort((a, b) => b[1] - a[1]);
   return `<section class="stack">
     <button class="btn ghost tiny" type="button" data-act="goto" data-screen="roster">Back to roster</button>
-    <article class="detail">
-      ${art(player.portrait, player.nick, 'tall')}
-      <div>
-        <p class="kicker">${roleTag(player.role)} ${esc(TRAIT_COPY[player.trait].name)}</p>
-        <h1>${esc(player.nick)}</h1>
-        <div class="link-rank">Link ${linkRank(career, player.id)} ${pips(linkRank(career, player.id))}</div>
-        <p class="line">${esc(confidantLine(career, player.id))}</p>
+    ${scene(career, { speakerId: player.id, text: confidantLine(career, player.id) }, { slim: true })}
+    <article class="panel">
         <p>${esc(player.name)}, ${player.age}. ${esc(TRAIT_COPY[player.trait].text)}</p>
         <dl class="stats">
           <div><dt>Overall</dt><dd>${overall(player)}</dd></div>
@@ -451,7 +460,7 @@ function playerScreen(app: AppState): string {
         ${statLine('Teamwork', player.teamwork)}
         ${statLine('Clutch', player.clutch)}
         <h2>Study</h2>
-        <p class="muted">The champion they queue in auto draft, and the one that gains extra mastery when they play it. Locked champions in the study also hit a little harder.</p>
+        <p class="muted">Auto draft queues this. Playing it, or locking it, hits a little harder.</p>
         <div class="row wrap">${roleChamps(player.role).map((id) => `<button type="button" class="btn tiny ${player.study === id ? 'on' : ''}" data-act="study" data-id="${player.id}" data-champ="${id}">${esc(champName(id))}</button>`).join('')}</div>
         ${rosterIds(playerTeam(career)).includes(player.id) && career.stage.kind !== 'offseason' ? `<div class="row"><button class="btn ${career.promiseId === player.id ? 'on' : ''}" type="button" data-act="promise" data-id="${player.id}">${career.promiseId === player.id ? 'Pull the promise' : 'Promise the start'}</button></div>` : ''}
         <h2>Links</h2>
@@ -467,7 +476,6 @@ function playerScreen(app: AppState): string {
         <h2>Champion pool</h2>
         ${masteries.map(([id, value]) => `<label>${esc(champName(id))} · ${masteryLabel(value)} ${bar(value)}</label>`).join('')}
         <p class="muted">Season ${player.seasonGames} games, ${player.seasonWins} series wins, ${player.seasonMvps} MVPs. Career MVPs ${player.careerMvps}.</p>
-      </div>
     </article>
   </section>`;
 }
@@ -490,7 +498,7 @@ function championScreen(app: AppState): string {
     .sort((a, b) => b.value - a.value);
   const score = selected.base + (career.patch[selected.id] ?? 0);
   return `<section class="stack">
-    <header class="section-head"><h1>Champion codex</h1><p>Twelve mythics. Three Norse, three Egyptian, three Greek, three Japanese. A 3v3 locks one warden, one slayer, one weaver.</p></header>
+    <header class="section-head"><h1>Champion codex</h1></header>
     <div class="filters">
       ${myths.map((myth) => `<button type="button" class="${app.champMyth === myth ? 'on' : ''}" data-act="myth-filter" data-myth="${myth}">${myth === 'all' ? 'All myths' : MYTH_LABEL[myth]}</button>`).join('')}
       ${roles.map((role) => `<button type="button" class="${app.champRole === role ? 'on' : ''}" data-act="role-filter" data-role="${role}">${role === 'all' ? 'All roles' : ROLE_LABEL[role]}</button>`).join('')}
@@ -704,18 +712,21 @@ function leagueScreen(app: AppState): string {
 function standingsTab(career: Career): string {
   const rows = standingsFor(career, 'regular');
   const rank = rankTeams(career);
-  return `<article class="panel"><h1>Regular season</h1><p>Top six reach the playoffs. Seeds 1 and 2 get a bye. The Spire Cup is a separate table.</p>
+  const fixture = findPlayerFixture(career);
+  const foeId = fixture ? opponentOf(fixture, career.playerTeamId) : '';
+  return `<article class="panel"><p class="kicker">Playoff line under 6 · bye for 1 and 2</p><h1>Regular season</h1>
     <table><thead><tr><th></th><th>Team</th><th class="num">W</th><th class="num">L</th><th class="num">Diff</th><th>Facility</th></tr></thead><tbody>
     ${rank.map((id, index) => {
       const team = teamById(career, id);
       const row = rows.find((entry) => entry.teamId === id);
-      return `<tr class="${index === 5 ? 'cut' : ''} ${team.player ? 'you' : ''}"><td>${index + 1}</td><td><button type="button" data-act="view-team" data-id="${id}">${esc(team.name)}</button></td><td class="num">${row?.wins ?? 0}</td><td class="num">${row?.losses ?? 0}</td><td class="num">${row?.diff ?? 0}</td><td>${esc(facilityAt(team.facility).name)}</td></tr>`;
+      return `<tr class="${index === 6 ? 'cut' : ''} ${team.player ? 'you' : ''} ${id === foeId ? 'foe' : ''}"><td>${index + 1}</td><td><button type="button" data-act="view-team" data-id="${id}">${esc(team.name)}</button></td><td class="num">${row?.wins ?? 0}</td><td class="num">${row?.losses ?? 0}</td><td class="num">${row?.diff ?? 0}</td><td>${esc(facilityAt(team.facility).name)}</td></tr>`;
     }).join('')}
     </tbody></table></article>`;
 }
 
 function scheduleTab(career: Career): string {
   const team = playerTeam(career);
+  const current = career.stage.kind === 'regular' ? career.stage.round : -1;
   const rounds = career.regularRounds.map((round, index) => {
     const pair = round.find(([home, away]) => home === team.id || away === team.id);
     if (!pair) return '';
@@ -723,7 +734,7 @@ function scheduleTab(career: Career): string {
     const foe = teamById(career, home ? pair[1] : pair[0]);
     const log = career.results.find((result) => result.season === career.year && result.kind === 'regular' && result.homeId === pair[0] && result.awayId === pair[1]);
     const score = log ? `${log.winnerId === team.id ? 'W' : 'L'} ${home ? log.homeKills : log.awayKills}–${home ? log.awayKills : log.homeKills}` : 'Upcoming';
-    return `<li><span>Week ${index + 1} · ${home ? 'Home' : 'Away'}</span><strong>${esc(foe.name)}</strong><em>${score}</em></li>`;
+    return `<li class="${index === current ? 'now' : ''}"><span>Week ${index + 1} · ${home ? 'Home' : 'Away'}</span><strong>${esc(foe.name)}</strong><em>${score}</em></li>`;
   });
   return `<article class="panel"><h1>Circuit schedule</h1><ol class="schedule">${rounds.join('')}</ol></article>`;
 }
@@ -791,19 +802,23 @@ function facilityScreen(app: AppState): string {
   const current = facilityAt(team.facility);
   const next = FACILITIES[team.facility + 1];
   return `<section class="stack">
-    <header class="section-head"><h1>${esc(current.name)}</h1><p>${esc(current.scene)}</p></header>
-    <article class="panel facility-now">
-      <p>${esc(current.unlock)}</p>
+    <article class="fixture">
+      <div>
+        <p class="kicker">House</p>
+        <h1>${esc(current.name)}</h1>
+        <p class="hook">${esc(current.scene)}</p>
+        <p class="muted">${esc(current.unlock)}</p>
+        ${next ? `<button class="btn primary" type="button" data-act="upgrade" ${team.cash < next.cost ? 'disabled' : ''}>Upgrade to ${esc(next.name)} · ${money(next.cost)}</button>` : '<p>The facility is complete.</p>'}
+        ${next && team.cash < next.cost ? `<p class="muted">Need ${money(next.cost - team.cash)} more.</p>` : ''}
+      </div>
       <dl class="stats">
         <div><dt>Training</dt><dd>${current.training.toFixed(2)}×</dd></div>
         <div><dt>Recovery</dt><dd>${current.recovery.toFixed(2)}×</dd></div>
         <div><dt>Revenue</dt><dd>${current.revenue.toFixed(2)}×</dd></div>
         <div><dt>Upkeep</dt><dd>${money(current.upkeep)}</dd></div>
       </dl>
-      ${next ? `<button class="btn primary" type="button" data-act="upgrade" ${team.cash < next.cost ? 'disabled' : ''}>Upgrade to ${esc(next.name)} · ${money(next.cost)}</button>` : '<p>The facility is complete.</p>'}
-      ${next && team.cash < next.cost ? `<p class="muted">Need ${money(next.cost - team.cash)} more.</p>` : ''}
     </article>
-    <ol class="facility-path">${FACILITIES.map((facility, index) => `<li class="${index === team.facility ? 'now' : ''} ${index < team.facility ? 'done' : ''}"><strong>${esc(facility.name)}</strong><span>${esc(facility.scene)}</span>${index > 0 ? `<em>${money(facility.cost)}</em>` : ''}</li>`).join('')}</ol>
+    <ol class="facility-path">${FACILITIES.map((facility, index) => `<li class="${index === team.facility ? 'now' : ''} ${index < team.facility ? 'done' : ''}"><strong>${esc(facility.name)}</strong><span>${index === team.facility ? 'You are here' : esc(facility.scene)}</span>${index > 0 ? `<em>${money(facility.cost)}</em>` : ''}</li>`).join('')}</ol>
   </section>`;
 }
 
@@ -814,7 +829,18 @@ function financeScreen(app: AppState): string {
   const facility = facilityAt(team.facility);
   const sponsor = Math.round((1500 + team.reputation * 55) * facility.revenue);
   return `<section class="stack">
-    <header class="section-head"><h1>${money(team.cash)}</h1><p>${esc(facility.name)} multiplies sponsorship and match day by ${facility.revenue.toFixed(2)}. Weekly payroll is ${money(payroll(career))} plus ${money(facility.upkeep)} upkeep. Sponsor this week is about ${money(sponsor)}.</p></header>
+    <article class="fixture">
+      <div>
+        <p class="kicker">${esc(facility.name)} · revenue ${facility.revenue.toFixed(2)}×</p>
+        <h1>${money(team.cash)}</h1>
+      </div>
+      <dl class="stats">
+        <div><dt>Payroll</dt><dd>${money(payroll(career))}</dd></div>
+        <div><dt>Upkeep</dt><dd>${money(facility.upkeep)}</dd></div>
+        <div><dt>Sponsor</dt><dd>${money(sponsor)}</dd></div>
+        <div><dt>Fans</dt><dd>${team.fans.toLocaleString('en-US')}</dd></div>
+      </dl>
+    </article>
     <article class="panel">
       <h2>Roster salaries</h2>
       <table><tbody>${rosterIds(team).map((id) => {

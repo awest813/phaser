@@ -1176,7 +1176,7 @@ function applyRoom(career: Career, side: 'a' | 'b'): void {
       }
       career.promiseId = first.id;
       first.morale = clamp(first.morale + 3, 5, 100);
-      career.roomEcho = 'This series is mine if you queue me.';
+      career.roomEcho = 'I will take this series if you queue me.';
     } else {
       first.morale = clamp(first.morale - 4, 5, 100);
       const leader = rosterIds(team).find((id) => career.players[id].trait === 'leader' && id !== first.id);
@@ -1445,7 +1445,7 @@ export function playCurrentWeek(career: Career): Career {
   if (next.room && !next.roomSpent) {
     const ignored = next.players[next.room.ids[0]];
     if (ignored) ignored.morale = clamp(ignored.morale - 4, 5, 100);
-    next.roomEcho = ignored ? 'You walked past me. I still wanted that word.' : 'The room was left alone.';
+    next.roomEcho = ignored ? 'You walked past me. I still wanted that word.' : 'I waited. Nobody came back.';
     next.roomSpent = true;
     pushNews(next, next.roomEcho);
   }

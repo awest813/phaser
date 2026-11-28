@@ -305,6 +305,7 @@ export function tapeSpeech(career: Career, report: WeekReport): Speech {
   }
   if (report.won) return { speakerId: speaker.id, text: WIN[speaker.id] ?? TRAIT_WIN[speaker.trait] };
   if (report.won === false) return { speakerId: speaker.id, text: LOSS[speaker.id] ?? TRAIT_LOSS[speaker.trait] };
+  if (report.kind === 'bye') return { speakerId: speaker.id, text: 'We watched the round. The bracket moved without us, and I already know the next queue.' };
   return { speakerId: speaker.id, text: 'The week is closed. The market is what is left.' };
 }
 

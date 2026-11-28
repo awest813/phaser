@@ -17,7 +17,8 @@ import {
   setTrainingChamp,
   signFreeAgent,
   swapRoster,
-  upgradeFacility
+  upgradeFacility,
+  findPlayerFixture
 } from './career.ts';
 import { autofillLineup } from './match.ts';
 import type { Action, AppState, Screen, Training, WeekPlan } from './types.ts';
@@ -90,6 +91,11 @@ export function apply(app: AppState, action: Action): AppState {
     }
     if (!career && action.screen !== 'create') return app;
     if (action.screen === 'match' && career) {
+      if (career.stage.kind !== 'offseason' && !findPlayerFixture(career)) {
+        next.notice = 'You are not in this round. Let the week play from the office.';
+        next.screen = 'office';
+        return next;
+      }
       if (career.stage.kind !== 'offseason' && !career.plan) {
         next.notice = 'Lock a plan before the draft.';
         next.screen = 'office';
@@ -206,16 +212,19 @@ export function apply(app: AppState, action: Action): AppState {
     return next;
   }
   if (action.type === 'play') {
-    if (!career.plan) {
+    const playing = !!findPlayerFixture(career);
+    if (playing && !career.plan) {
       next.notice = 'Lock a plan before the draft.';
       next.screen = 'office';
       return next;
     }
-    const problems = lineupProblems(career);
-    if (problems.length) {
-      next.notice = problems[0];
-      next.screen = 'match';
-      return next;
+    if (playing) {
+      const problems = lineupProblems(career);
+      if (problems.length) {
+        next.notice = problems[0];
+        next.screen = 'match';
+        return next;
+      }
     }
     next.career = playCurrentWeek(career);
     next.screen = 'result';

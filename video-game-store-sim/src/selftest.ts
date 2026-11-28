@@ -20,7 +20,7 @@ import {
 } from './game/career.ts';
 import { apply, initialApp } from './game/actions.ts';
 import { FACILITIES } from './game/facilities.ts';
-import { bestChampFor, describeWeek, lineupProblems, suggestBan } from './game/match.ts';
+import { bestChampFor, describeWeek, findPlayerFixture, lineupProblems, suggestBan } from './game/match.ts';
 import { CHAMPIONS } from './game/champions.ts';
 import { overall } from './game/roster.ts';
 import { linkRank, morningLine, roomSpeech, tapeSpeech } from './game/voice.ts';
@@ -196,6 +196,25 @@ function run(): void {
   assert(new Set(rosterIds(you)).size === 6, 'trade duplicated a player');
   assert(Object.keys(traded.career.ties).some((key) => key.includes(incoming)), 'newcomer ties');
   app.career = traded.career;
+  const ids = app.career.orgs.map((team) => team.id).filter((id) => id !== app.career?.playerTeamId);
+  const bye = structuredClone(app.career);
+  bye.plan = null;
+  bye.stage = { kind: 'play-in' };
+  bye.playoffs = {
+    seeds: [bye.playerTeamId, ids[0], ids[1], ids[2], ids[3], ids[4]],
+    playIn: [
+      { homeId: ids[1], awayId: ids[4], homeWins: 0, awayWins: 0, done: false },
+      { homeId: ids[2], awayId: ids[3], homeWins: 0, awayWins: 0, done: false }
+    ],
+    semis: [],
+    final: null
+  };
+  const watched = playCurrentWeek(bye);
+  assert(watched.lastReport?.kind === 'bye' && watched.lastReport.won === undefined, 'top-seed bye is not a loss');
+  assert(watched.stage.kind === 'playoff-semi', `bye should reach the semi, got ${watched.stage.kind}`);
+  assert(watched.playoffs?.semis.some((series) => series.homeId === watched.playerTeamId), 'bye seed is in the semi');
+  const watchedLine = watched.lastReport ? tapeSpeech(watched, watched.lastReport).text : '';
+  assert(!/market/i.test(watchedLine), watchedLine);
   let guard = 0;
   let seasons = 0;
   while (app.career && seasons < 2 && guard < 90) {
@@ -208,6 +227,7 @@ function run(): void {
       seasons += 1;
       continue;
     }
+    const hadFixture = !!findPlayerFixture(app.career);
     app.career = autofill(app.career);
     const problems = lineupProblems(app.career);
     assert(problems.length === 0, `${app.career.stage.kind} lineup: ${problems.join('; ')}`);
@@ -215,6 +235,10 @@ function run(): void {
     app.career = playCurrentWeek(app.career);
     assertCareer(app.career);
     assert(app.career.lastReport, 'missing report');
+    if (!hadFixture) {
+      assert(app.career.lastReport?.kind === 'bye', 'a week without you is a bye');
+      assert(app.career.lastReport?.won === undefined, 'a bye is not a defeat');
+    }
     guard += 1;
     if (before === app.career.stage.kind && app.career.stage.kind !== 'offseason') {
       const stage = app.career.stage;

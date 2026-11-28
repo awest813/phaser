@@ -237,6 +237,17 @@ html, body { overflow-x: clip; }
 }
 .beats span.on { color: #24190c; background: var(--gold); border-color: transparent; }
 .beats span.now { color: var(--gold); border-color: var(--gold); }
+.season-rail { display: flex; flex-wrap: wrap; gap: 0.35rem 0.7rem; margin-bottom: 0.35rem; }
+.season-rail span { color: var(--muted); font-size: 0.68rem; letter-spacing: 0.14em; text-transform: uppercase; }
+.season-rail span.now { color: var(--gold); }
+.season-rail span.done { color: var(--ink); }
+.bracket { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.7rem; margin-top: 1rem; }
+.series-card { display: grid; gap: 0.35rem; padding: 0.75rem 0.85rem; border: 1px solid var(--line); border-radius: 14px; background: rgba(255, 255, 255, 0.03); }
+.series-card.yours { border-color: color-mix(in srgb, var(--gold) 55%, var(--line)); }
+.series-row { display: flex; justify-content: space-between; gap: 0.8rem; align-items: baseline; }
+.series-row span { font-variant-numeric: tabular-nums; color: var(--muted); }
+.series-row.win strong, .seeds li.you { color: var(--gold); }
+.market-card .art { border-radius: 18px 18px 0 0; aspect-ratio: 4 / 3; }
 .plan-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.7rem; }
 .plan-grid button {
   text-align: left;
@@ -272,7 +283,7 @@ html, body { overflow-x: clip; }
   aspect-ratio: auto;
   border-radius: 18px 0 0 18px;
 }
-.scene .art span, .portrait-btn .art span, .detail .art span, .champ-card .art span, .slot .art span, .ban .art span { display: none; }
+.scene .art span, .portrait-btn .art span, .detail .art span, .champ-card .art span, .slot .art span, .ban .art span, .market-card .art span { display: none; }
 .scene.slim { grid-template-columns: 148px minmax(0, 1fr); }
 .scene.slim .bust .art { min-height: 168px; }
 .scene.slim p.line { font-size: 1.08rem; }

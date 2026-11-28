@@ -1411,8 +1411,11 @@ function nextHook(career: Career): string {
 }
 
 export function playCurrentWeek(career: Career): Career {
-  const problems = lineupProblems(career);
-  if (problems.length) throw new Error(problems[0]);
+  const playing = !!findPlayerFixture(career);
+  if (playing) {
+    const problems = lineupProblems(career);
+    if (problems.length) throw new Error(problems[0]);
+  }
   const week = describeWeek(career);
   if (!week) throw new Error('No week to play.');
   const next = structuredClone(career);
@@ -1426,7 +1429,6 @@ export function playCurrentWeek(career: Career): Career {
     label: week.label,
     kind: fixtureList.find((fixture) => fixture.homeId === you || fixture.awayId === you)?.kind ?? 'bye',
     home: false,
-    won: false,
     games: [],
     cashDelta: 0,
     fansDelta: 0,
@@ -1494,6 +1496,7 @@ export function playCurrentWeek(career: Career): Career {
       also.push(`${home.tag} ${resolved.homeWins}–${resolved.awayWins} ${away.tag}`);
     }
   }
+  if (!playerPlayed) report.notes.unshift('You were not in this round.');
   if (also.length) report.notes.push(`Also this week: ${also.join(', ')}.`);
   if (playerPlayed) settleMinutes(next, queued, report.won === true, report, rng);
   if (next.lastScrim && next.scrimDone) report.notes.unshift(next.lastScrim.note);
@@ -1690,6 +1693,15 @@ function advance(career: Career, rng: Rng, report: WeekReport): void {
   }
   if (stage.kind === 'play-in' && career.playoffs) {
     const series = career.playoffs.playIn.find((entry) => entry.homeId === career.playerTeamId || entry.awayId === career.playerTeamId);
+    const bye = !series && career.playoffs.seeds.slice(0, 2).includes(career.playerTeamId);
+    if (bye) {
+      ensurePlayoffSemis(career);
+      career.playoffResult = 'Semifinal';
+      career.stage = { kind: 'playoff-semi' };
+      report.notes.push('The play-in is done. Your bye is over.');
+      pushNews(career, 'Play-in finished. The semifinal is next.');
+      return;
+    }
     const won = seriesWinner(series) === career.playerTeamId;
     if (!won) {
       simPlayoffRemainder(career, rng);

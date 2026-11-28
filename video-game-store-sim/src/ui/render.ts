@@ -148,7 +148,7 @@ function shell(app: AppState, content: string): string {
     </aside>
     <div class="main">
       <header class="topbar">
-        <div class="phase"><span class="kicker">${esc(phaseLabel(career))}</span><strong>${esc(describeWeek(career)?.label ?? 'Offseason')}</strong>${weekBeats(app)}</div>
+        <div class="phase">${seasonRail(career)}<span class="kicker">${esc(phaseLabel(career))}</span><strong>${esc(describeWeek(career)?.label ?? 'Offseason')}</strong>${weekBeats(app)}</div>
         <div class="meters">
           ${streakMeter(career.streak ?? 0)}
           <div class="meter"><span>Cash</span><strong>${money(team.cash)}</strong></div>
@@ -162,12 +162,31 @@ function shell(app: AppState, content: string): string {
   </div>`;
 }
 
+function seasonRail(career: Career): string {
+  const kind = career.stage.kind;
+  const cupOn = kind === 'cup' || kind === 'cup-semi' || kind === 'cup-final';
+  const playOn = kind === 'play-in' || kind === 'playoff-semi' || kind === 'playoff-final';
+  const cupDone = !cupOn && career.cupResult !== 'Not started';
+  const steps: [string, boolean, boolean][] = [
+    ['Preseason', kind === 'preseason', kind !== 'preseason'],
+    ['Regular', kind === 'regular', kind !== 'preseason' && kind !== 'regular'],
+    ['Spire Cup', cupOn, cupDone],
+    ['Playoffs', playOn, kind === 'offseason'],
+    ['Market', kind === 'offseason', false]
+  ];
+  return `<div class="season-rail">${steps.map(([label, now, done]) => `<span class="${now ? 'now' : done ? 'done' : ''}">${label}</span>`).join('')}</div>`;
+}
+
 function weekBeats(app: AppState): string {
   const career = app.career;
   if (!career || career.stage.kind === 'offseason') return '';
+  const sitting = !findPlayerFixture(career);
   const planned = !!career.plan;
   const onMatch = app.screen === 'match';
   const onTape = app.screen === 'result';
+  if (sitting || (onTape && career.lastReport?.kind === 'bye')) {
+    return `<div class="beats"><span>1 Plan</span><span>2 Draft</span><span class="${onTape ? 'on' : 'now'}">3 Tape</span></div>`;
+  }
   const planClass = planned || onMatch || onTape ? 'on' : 'now';
   const draftClass = onTape || onMatch ? 'on' : planned ? 'now' : '';
   const tapeClass = onTape ? 'on' : '';
@@ -346,6 +365,24 @@ function tradeBlock(career: Career): string {
   </article>`;
 }
 
+function fixtureKicker(career: Career, foe: { id: string } | null, fixture: { homeId: string; series: number } | null): string {
+  if (!foe || !fixture) return career.stage.kind === 'offseason' ? 'Offseason' : 'This round';
+  const place = foe.id === career.rivalId ? `Rivalry · heat ${career.rivalHeat}` : fixture.homeId === career.playerTeamId ? 'Home' : 'Away';
+  return fixture.series > 1 ? `${place} · best of ${fixture.series}` : place;
+}
+
+function byeTitle(career: Career): string {
+  if (career.stage.kind === 'play-in' && career.playoffs?.seeds.slice(0, 2).includes(career.playerTeamId)) return 'First-round bye';
+  return 'You watch this round';
+}
+
+function byeHook(career: Career): string {
+  if (career.stage.kind === 'play-in' && career.playoffs?.seeds.slice(0, 2).includes(career.playerTeamId)) {
+    return 'Seeds one and two wait. The play-in decides who you meet.';
+  }
+  return 'Your roster is not in it. The other series still count.';
+}
+
 function awardBlock(career: Career): string {
   if (!career.awards.length) return '';
   return `<article class="panel span-2"><h2>Season ${career.awards[0].year} awards</h2><ul class="news">${career.awards.map((award) => `<li>${esc(award.title)}: ${esc(award.playerName)} (${esc(teamById(career, award.teamId).tag)}) · ${esc(award.detail)}</li>`).join('')}</ul></article>`;
@@ -365,11 +402,12 @@ function officeScreen(app: AppState): string {
     ${officeScene(career)}
     <article class="fixture">
       <div>
-        <p class="kicker">${foe ? (foe.id === career.rivalId ? `Rivalry · heat ${career.rivalHeat}` : fixture?.homeId === team.id ? 'Home' : 'Away') : career.stage.kind === 'offseason' ? 'Offseason' : 'Open'}</p>
-        <h1>${foe ? esc(foe.name) : career.stage.kind === 'offseason' ? 'The market is open' : 'Open week'}</h1>
-        <p class="hook">${esc(raceLine(career))}</p>
+        <p class="kicker">${fixtureKicker(career, foe, fixture)}</p>
+        <h1>${foe ? esc(foe.name) : career.stage.kind === 'offseason' ? 'The market is open' : byeTitle(career)}</h1>
+        <p class="hook">${foe || career.stage.kind === 'offseason' ? esc(raceLine(career)) : esc(byeHook(career))}</p>
         ${streakCopy(career.streak ?? 0) ? `<p class="${(career.streak ?? 0) > 0 ? 'streak-hot' : 'streak-cold'}">${esc(streakCopy(career.streak ?? 0))}</p>` : ''}
-        ${career.stage.kind === 'offseason' ? '<div class="row"><button class="btn primary" type="button" data-act="goto" data-screen="offseason">Open offseason</button></div>' : ''}
+        ${career.stage.kind === 'offseason' ? '<div class="row"><button class="btn primary" type="button" data-act="goto" data-screen="offseason">Open the market</button></div>' : ''}
+        ${!foe && career.stage.kind !== 'offseason' ? '<div class="row"><button class="btn primary" type="button" data-act="play">Let the week play</button></div>' : ''}
       </div>
       <dl class="stats">
         <div><dt>Record</dt><dd>${standing.wins}-${standing.losses}</dd></div>
@@ -658,7 +696,7 @@ function resultScreen(app: AppState): string {
   const offseason = career.stage.kind === 'offseason';
   return `<section class="stack scoreboard ${tone}">
     <p class="kicker">${esc(report.label)} · ${esc(kind)}</p>
-    <h1>${report.won === undefined ? 'Week complete' : report.won ? 'Victory' : 'Defeat'}${streakMark} ${report.scoreline ? esc(report.scoreline) : ''}</h1>
+    <h1>${report.won === undefined ? (report.kind === 'bye' ? 'Bye' : 'Week complete') : report.won ? 'Victory' : 'Defeat'}${streakMark}${report.scoreline ? ` ${esc(report.scoreline)}` : ''}</h1>
     <p>${report.opponentName ? `${report.home ? 'Home' : 'Away'} against ${esc(report.opponentName)}.` : ''} ${report.mvpName ? `${esc(report.mvpName)} takes MVP.` : ''}</p>
     <div class="pills"><span>${money(report.cashDelta)} cash</span><span>${report.fansDelta >= 0 ? '+' : ''}${report.fansDelta} fans</span>${report.bountyNote?.startsWith('Bounty cleared') ? '<span>Bounty paid</span>' : ''}</div>
     ${scene(career, tapeSpeech(career, report), { slim: true })}
@@ -739,6 +777,24 @@ function scheduleTab(career: Career): string {
   return `<article class="panel"><h1>Circuit schedule</h1><ol class="schedule">${rounds.join('')}</ol></article>`;
 }
 
+function seriesCard(
+  career: Career,
+  label: string,
+  series: { homeId: string; awayId: string; homeWins: number; awayWins: number; done: boolean } | null
+): string {
+  if (!series) return '';
+  const home = teamById(career, series.homeId);
+  const away = teamById(career, series.awayId);
+  const yours = series.homeId === career.playerTeamId || series.awayId === career.playerTeamId;
+  const homeWin = series.done && series.homeWins > series.awayWins;
+  const awayWin = series.done && series.awayWins > series.homeWins;
+  return `<article class="series-card${yours ? ' yours' : ''}">
+    <p class="kicker">${esc(label)}${series.done ? '' : ' · scheduled'}</p>
+    <div class="series-row${homeWin ? ' win' : ''}"><strong>${esc(home.name)}</strong><span>${series.homeWins}</span></div>
+    <div class="series-row${awayWin ? ' win' : ''}"><strong>${esc(away.name)}</strong><span>${series.awayWins}</span></div>
+  </article>`;
+}
+
 function cupTab(career: Career): string {
   if (!career.cup) return `<article class="panel"><h1>Spire Cup</h1><p>Groups lock after six regular-season games. Group games do not change the regular standings.</p></article>`;
   const table = (ids: string[], title: string) => {
@@ -747,30 +803,24 @@ function cupTab(career: Career): string {
     return `<div><h2>${title}</h2><table><tbody>${rank.map((id, index) => {
       const row = rows.find((entry) => entry.teamId === id);
       const team = teamById(career, id);
-      return `<tr class="${index < 2 ? 'in' : ''}"><td>${esc(team.tag)}</td><td>${row?.wins ?? 0}-${row?.losses ?? 0}</td><td>${row?.diff ?? 0}</td></tr>`;
+      return `<tr class="${id === career.playerTeamId ? 'you' : ''} ${index < 2 ? 'in' : ''}"><td>${esc(team.tag)}</td><td>${row?.wins ?? 0}-${row?.losses ?? 0}</td><td>${row?.diff ?? 0}</td></tr>`;
     }).join('')}</tbody></table></div>`;
   };
-  const seriesLine = (series: { homeId: string; awayId: string; homeWins: number; awayWins: number; done: boolean } | null, label: string) => {
-    if (!series) return '';
-    return `<li>${label}: ${esc(teamById(career, series.homeId).tag)} ${series.homeWins}–${series.awayWins} ${esc(teamById(career, series.awayId).tag)}${series.done ? '' : ' · scheduled'}</li>`;
-  };
-  return `<article class="panel"><h1>Spire Cup</h1><p>${esc(career.cupResult)}${career.cup.championId ? ` · ${esc(teamById(career, career.cup.championId).name)}` : ''}</p>
+  return `<article class="panel"><p class="kicker">${esc(career.cupResult)}${career.cup.championId ? ` · ${esc(teamById(career, career.cup.championId).name)}` : ''}</p><h1>Spire Cup</h1>
     <div class="split">${table(career.cup.groups.a, 'Group A')}${table(career.cup.groups.b, 'Group B')}</div>
-    <ul class="news">${career.cup.semis.map((series, index) => seriesLine(series, `Semi ${index + 1}`)).join('')}${seriesLine(career.cup.final, 'Final')}</ul>
+    <div class="bracket">${career.cup.semis.map((series, index) => seriesCard(career, `Semi ${index + 1}`, series)).join('')}${seriesCard(career, 'Final', career.cup.final)}</div>
   </article>`;
 }
 
 function playoffTab(career: Career): string {
   if (!career.playoffs) return `<article class="panel"><h1>Playoffs</h1><p>Top six after the regular season. Seeds 1 and 2 wait. 3 plays 6, 4 plays 5, then the semifinals and a best-of-five final.</p></article>`;
-  const line = (label: string, series: { homeId: string; awayId: string; homeWins: number; awayWins: number; done: boolean } | null) =>
-    series ? `<li><strong>${label}</strong> ${esc(teamById(career, series.homeId).name)} ${series.homeWins}–${series.awayWins} ${esc(teamById(career, series.awayId).name)}</li>` : '';
-  return `<article class="panel"><h1>Playoffs</h1><p>${esc(career.playoffResult)}${career.playoffs.championId ? ` · Champion ${esc(teamById(career, career.playoffs.championId).name)}` : ''}</p>
-    <ol class="seeds">${career.playoffs.seeds.map((id, index) => `<li>${index + 1}. ${esc(teamById(career, id).name)}</li>`).join('')}</ol>
-    <ul class="news">
-      ${career.playoffs.playIn.map((series, index) => line(`Play-in ${index + 1}`, series)).join('')}
-      ${career.playoffs.semis.map((series, index) => line(`Semifinal ${index + 1}`, series)).join('')}
-      ${line('Final', career.playoffs.final)}
-    </ul>
+  return `<article class="panel"><p class="kicker">${esc(career.playoffResult)}${career.playoffs.championId ? ` · ${esc(teamById(career, career.playoffs.championId).name)}` : ''}</p><h1>Playoffs</h1>
+    <ol class="seeds">${career.playoffs.seeds.map((id, index) => `<li class="${id === career.playerTeamId ? 'you' : ''}">${index + 1}. ${esc(teamById(career, id).name)}</li>`).join('')}</ol>
+    <div class="bracket">
+      ${career.playoffs.playIn.map((series, index) => seriesCard(career, `Play-in ${index + 1}`, series)).join('')}
+      ${career.playoffs.semis.map((series, index) => seriesCard(career, `Semifinal ${index + 1}`, series)).join('')}
+      ${seriesCard(career, 'Final', career.playoffs.final)}
+    </div>
   </article>`;
 }
 
@@ -860,14 +910,29 @@ function offseasonScreen(app: AppState): string {
   }
   const team = playerTeam(career);
   const ready = rosterReady(career);
+  const standing = playerStanding(career);
   return `<section class="stack">
-    <header class="section-head"><h1>Offseason</h1><p>Season ${career.year} finished ${playerStanding(career).wins}-${playerStanding(career).losses}. Cup: ${esc(career.cupResult)}. Playoffs: ${esc(career.playoffResult)}. Re-sign expiring deals, or cut and shop.</p></header>
+    <article class="fixture">
+      <div>
+        <p class="kicker">Season ${career.year}</p>
+        <h1>${standing.wins}–${standing.losses}</h1>
+        <p class="hook">Cup ${esc(career.cupResult)}. Playoffs ${esc(career.playoffResult)}.</p>
+        <p class="muted">Re-sign anyone whose deal expired, then open the next season.</p>
+      </div>
+      <dl class="stats">
+        <div><dt>Place</dt><dd>${playerPlace(career) || '—'}</dd></div>
+        <div><dt>Cash</dt><dd>${money(team.cash)}</dd></div>
+        <div><dt>Payroll</dt><dd>${money(payroll(career))}</dd></div>
+        <div><dt>Fans</dt><dd>${team.fans.toLocaleString('en-US')}</dd></div>
+      </dl>
+    </article>
     ${awardBlock(career)}
+    <h2>Your roster</h2>
     <div class="roster-grid">${rosterIds(team).map((id) => contractCard(career, id)).join('')}</div>
-    <h2>Free agents</h2>
+    <h2>The market</h2>
     <div class="roster-grid">${career.freeAgents.map((id) => freeAgentCard(career, id)).join('') || '<p>The market is empty.</p>'}</div>
-    <button class="btn primary" type="button" data-act="next-season">Begin season ${career.year + 1}</button>
     ${ready ? `<p class="warn">${esc(ready)}</p>` : '<p class="muted">Roster is set. The next patch drops when the new season opens.</p>'}
+    <button class="btn primary next-week" type="button" data-act="next-season">Begin season ${career.year + 1}</button>
   </section>`;
 }
 
@@ -876,7 +941,7 @@ function contractCard(career: Career, id: string): string {
   const team = playerTeam(career);
   const ask = demand(player);
   const severance = player.contractStatus === 'expiring' || player.contractYears <= 0 ? 0 : player.salary * 4 * player.contractYears;
-  return `<article class="player-card"><div class="player-body">
+  return `<article class="player-card market-card">${art(player.portrait, player.nick)}<div class="player-body">
     <strong>${esc(player.nick)}</strong>
     <span>${overall(player)} OVR · pot ${player.potential} · ${ROLE_LABEL[player.role]}</span>
     <span class="muted">${player.contractStatus === 'expiring' ? `Expired · wants ${money(ask)}/wk` : `${player.contractYears}y left · ${money(player.salary)}/wk`}</span>
@@ -890,8 +955,7 @@ function freeAgentCard(career: Career, id: string): string {
   const player = career.players[id];
   const team = playerTeam(career);
   const blocked = overall(player) >= 80 && team.facility < 5;
-  return `<article class="player-card"><div class="player-body">
-    ${art(player.portrait, player.nick)}
+  return `<article class="player-card market-card">${art(player.portrait, player.nick)}<div class="player-body">
     <strong>${esc(player.nick)}</strong>
     <span>${esc(player.name)} · ${player.age} · ${ROLE_LABEL[player.role]}</span>
     <span>${overall(player)} OVR · pot ${player.potential} · ${money(player.salary)}/wk</span>

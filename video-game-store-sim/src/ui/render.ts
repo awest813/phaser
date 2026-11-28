@@ -28,16 +28,9 @@ import {
   teamPower
 } from '../game/match.ts';
 import { TRAIT_COPY, bestMasteryId, demand, masteryLabel, overall, roleChamps } from '../game/roster.ts';
-import type { AppState, Career, Champion, MatchKind, Player, Strategy, Team } from '../game/types.ts';
-
-const TRAINING: { id: Career['orgs'][number]['training']; name: string; text: string }[] = [
-  { id: 'synergy', name: 'Teamwork', text: 'Chemistry work. Lighter than a real scrim.' },
-  { id: 'mechanics', name: 'Mechanics', text: 'Hands get sharper. Fatigue comes with it.' },
-  { id: 'macro', name: 'VOD', text: 'Game sense. Lighter than scrims.' },
-  { id: 'champion', name: 'Champ lab', text: 'Everyone practices one champion.' },
-  { id: 'academy', name: 'Academy', text: 'Prospects train. The main roster rests.' },
-  { id: 'rest', name: 'Rest', text: 'Clear fatigue before a bad week becomes an injury.' }
-];
+import { confidantLine, draftSpeech, linkRank, morningLine, planSpeech, roomSpeech, tapeSpeech } from '../game/voice.ts';
+import type { Speech } from '../game/voice.ts';
+import type { AppState, Career, Champion, MatchKind, Player, RoomEvent, Strategy, Team, WeekPlan } from '../game/types.ts';
 
 const STRATEGIES: { id: Strategy; name: string; text: string }[] = [
   { id: 'snowball', name: 'Snowball', text: 'End it early. Strong into scaling comps.' },
@@ -155,7 +148,7 @@ function shell(app: AppState, content: string): string {
     </aside>
     <div class="main">
       <header class="topbar">
-        <div class="phase"><span class="kicker">${esc(phaseLabel(career))}</span><strong>${esc(describeWeek(career)?.label ?? 'Offseason')}</strong></div>
+        <div class="phase">${seasonRail(career)}<span class="kicker">${esc(phaseLabel(career))}</span><strong>${esc(describeWeek(career)?.label ?? 'Offseason')}</strong>${weekBeats(app)}</div>
         <div class="meters">
           ${streakMeter(career.streak ?? 0)}
           <div class="meter"><span>Cash</span><strong>${money(team.cash)}</strong></div>
@@ -167,6 +160,37 @@ function shell(app: AppState, content: string): string {
       ${content}
     </div>
   </div>`;
+}
+
+function seasonRail(career: Career): string {
+  const kind = career.stage.kind;
+  const cupOn = kind === 'cup' || kind === 'cup-semi' || kind === 'cup-final';
+  const playOn = kind === 'play-in' || kind === 'playoff-semi' || kind === 'playoff-final';
+  const cupDone = !cupOn && career.cupResult !== 'Not started';
+  const steps: [string, boolean, boolean][] = [
+    ['Preseason', kind === 'preseason', kind !== 'preseason'],
+    ['Regular', kind === 'regular', kind !== 'preseason' && kind !== 'regular'],
+    ['Spire Cup', cupOn, cupDone],
+    ['Playoffs', playOn, kind === 'offseason'],
+    ['Market', kind === 'offseason', false]
+  ];
+  return `<div class="season-rail">${steps.map(([label, now, done]) => `<span class="${now ? 'now' : done ? 'done' : ''}">${label}</span>`).join('')}</div>`;
+}
+
+function weekBeats(app: AppState): string {
+  const career = app.career;
+  if (!career || career.stage.kind === 'offseason') return '';
+  const sitting = !findPlayerFixture(career);
+  const planned = !!career.plan;
+  const onMatch = app.screen === 'match';
+  const onTape = app.screen === 'result';
+  if (sitting || (onTape && career.lastReport?.kind === 'bye')) {
+    return `<div class="beats"><span>1 Plan</span><span>2 Draft</span><span class="${onTape ? 'on' : 'now'}">3 Tape</span></div>`;
+  }
+  const planClass = planned || onMatch || onTape ? 'on' : 'now';
+  const draftClass = onTape || onMatch ? 'on' : planned ? 'now' : '';
+  const tapeClass = onTape ? 'on' : '';
+  return `<div class="beats"><span class="${planClass}">1 Plan</span><span class="${draftClass}">2 Draft</span><span class="${tapeClass}">3 Tape</span></div>`;
 }
 
 function streakMeter(streak: number): string {
@@ -221,53 +245,142 @@ function body(app: AppState): string {
   }
 }
 
-function roomBlock(career: Career): string {
-  if (career.stage.kind === 'offseason' || !career.room) return '';
-  if (career.roomSpent) {
-    return `<article class="panel"><h2>The room</h2><p class="scrim-note">${esc(career.roomEcho || 'The conversation is settled for this week.')}</p></article>`;
+function pips(rank: number): string {
+  return `<span class="pips">${[1, 2, 3, 4, 5].map((n) => `<i class="${n <= rank ? 'on' : ''}"></i>`).join('')}</span>`;
+}
+
+function datePlate(career: Career): string {
+  const stage = career.stage;
+  let phase = 'Offseason';
+  let n = '—';
+  if (stage.kind === 'preseason') {
+    phase = 'Preseason';
+    n = String(stage.round + 1).padStart(2, '0');
+  } else if (stage.kind === 'regular') {
+    phase = 'Regular';
+    n = String(stage.round + 1).padStart(2, '0');
+  } else if (stage.kind === 'cup') {
+    phase = 'Spire Cup';
+    n = String(stage.round + 1).padStart(2, '0');
+  } else if (stage.kind === 'cup-semi') {
+    phase = 'Spire Cup';
+    n = 'SF';
+  } else if (stage.kind === 'cup-final') {
+    phase = 'Spire Cup';
+    n = 'F';
+  } else if (stage.kind === 'play-in') {
+    phase = 'Playoffs';
+    n = 'IN';
+  } else if (stage.kind === 'playoff-semi') {
+    phase = 'Playoffs';
+    n = 'SF';
+  } else if (stage.kind === 'playoff-final') {
+    phase = 'Playoffs';
+    n = 'F';
   }
-  const room = career.room;
-  return `<article class="panel">
-    <h2>The room</h2>
-    <p>${esc(room.text)}</p>
-    <div class="choice room-choice">
-      <button type="button" data-act="room" data-side="a"><strong>${esc(room.a.label)}</strong><span>${esc(room.a.detail)}</span></button>
-      <button type="button" data-act="room" data-side="b"><strong>${esc(room.b.label)}</strong><span>${esc(room.b.detail)}</span></button>
+  const numbered = /^\d/.test(n);
+  return `<div class="dateplate"><span>${esc(phase)}</span><strong>${esc(n)}</strong>${numbered ? '<em>Week</em>' : ''}</div>`;
+}
+
+function scene(career: Career, speech: Speech, opts: { date?: boolean; replies?: RoomEvent | null; slim?: boolean } = {}): string {
+  const player = career.players[speech.speakerId];
+  if (!player) return '';
+  const rank = linkRank(career, player.id);
+  const replies = opts.replies;
+  return `<article class="panel scene${opts.slim ? ' slim' : ''}">
+    <div class="bust">${art(player.portrait, player.nick)}</div>
+    <div class="scene-body">
+      <div class="scene-top">
+        <div>
+          <div class="nameplate"><strong>${esc(player.nick)}</strong><small>${esc(TRAIT_COPY[player.trait].name)}</small></div>
+          <div class="link-rank">Link ${rank} ${pips(rank)}</div>
+        </div>
+        ${opts.date ? datePlate(career) : ''}
+      </div>
+      <p class="line">${esc(speech.text)}</p>
+      ${replies ? `<div class="replies">
+        <button type="button" data-act="room" data-side="a"><b>1</b><span><strong>${esc(replies.a.label)}</strong><em>${esc(replies.a.detail)}</em></span></button>
+        <button type="button" data-act="room" data-side="b"><b>2</b><span><strong>${esc(replies.b.label)}</strong><em>${esc(replies.b.detail)}</em></span></button>
+      </div>` : ''}
     </div>
   </article>`;
 }
 
-function practiceBlock(career: Career): string {
-  if (career.stage.kind === 'offseason' || !describeWeek(career)) return '';
-  if (career.scrimDone && career.lastScrim) {
-    return `<article class="panel"><h2>Practice block</h2><p class="scrim-note">${esc(career.lastScrim.note)}</p><p class="muted">One block a week. It is spent.</p></article>`;
+function officeScene(career: Career): string {
+  if (career.plan) return scene(career, morningLine(career), { date: true });
+  const talk = roomSpeech(career);
+  if (talk && career.room && !career.roomSpent) return scene(career, talk, { date: true, replies: career.room });
+  if (talk && career.roomSpent) return scene(career, talk, { date: true });
+  return scene(career, morningLine(career), { date: true });
+}
+
+function planBlock(career: Career): string {
+  const fixture = findPlayerFixture(career);
+  if (career.stage.kind === 'offseason' || !fixture) return '';
+  const foe = teamById(career, opponentOf(fixture, career.playerTeamId));
+  if (career.plan) {
+    const name = career.plan === 'scrim' ? `Scrim ${foe.tag}` : career.plan === 'house' ? 'House' : career.plan === 'study' ? 'Study' : 'Rest';
+    return `<article class="panel plan-locked">
+      <div>
+        <p class="kicker">Plan locked · ${esc(name)}</p>
+        <p class="scrim-note">${esc(career.planNote || 'The week is set.')}</p>
+      </div>
+      <button class="btn primary" type="button" data-act="goto" data-screen="match">Open the draft</button>
+    </article>`;
   }
-  const foes = career.orgs.filter((team) => !team.player);
-  return `<article class="panel">
-    <h2>Practice block</h2>
-    <p>One block before the match. A house set raises chemistry and tires everyone. A circuit scrim pays a little, tires both lineups, and puts their habit on the whiteboard.</p>
-    <div class="scrim-row">
-      <button class="btn" type="button" data-act="scrim-house">House block</button>
-      ${foes.map((team) => `<button class="btn" type="button" data-act="scrim-circuit" data-id="${team.id}">Scrim ${esc(team.tag)}</button>`).join('')}
-    </div>
+  const cards: [WeekPlan, string, string][] = [
+    ['scrim', `Scrim ${foe.tag}`, 'One game against this opponent. A purse, fatigue on both lineups, and their habit on the board.'],
+    ['house', 'House', 'Starters against prospects. Chemistry rises. Everyone tires.'],
+    ['study', 'Study', 'Each player works the champion they are studying. Mastery moves before the draft.'],
+    ['rest', 'Rest', 'Fatigue comes off now, so the players you queue are the fresh ones.']
+  ];
+  return `<article class="panel week-choice">
+    <h2>Spend the week</h2>
+    <div class="plan-grid">${cards
+      .map(([id, name, text]) => {
+        const voice = planSpeech(career, id);
+        const who = career.players[voice.speakerId];
+        return `<button type="button" data-act="plan" data-plan="${id}"><span class="who">${who ? esc(who.nick) : ''}</span><strong>${esc(name)}</strong><em>${esc(voice.text)}</em><span>${esc(text)}</span></button>`;
+      })
+      .join('')}</div>
   </article>`;
 }
 
 function tradeBlock(career: Career): string {
   if (career.stage.kind === 'offseason') return '';
   const offer = career.offers[0];
-  if (!offer) return `<article class="panel"><h2>Trade calls</h2><p class="muted">No one is on the line this week.</p></article>`;
+  if (!offer) return '';
   const give = career.players[offer.theyGive];
   const want = career.players[offer.theyWant];
-  return `<article class="panel offer">
-    <h2>Trade call</h2>
-    <p>${esc(offer.note)}</p>
-    <p class="muted">${want ? `${esc(want.nick)} ${overall(want)} OVR` : ''} · ${give ? `${esc(give.nick)} ${overall(give)} OVR, pot ${give.potential}` : ''}. The call expires when you queue the match.</p>
+  return `<article class="call">
+    <div>
+      <p class="kicker">On the line</p>
+      <p>${esc(offer.note)}</p>
+      <p class="muted">${want ? `${esc(want.nick)} ${overall(want)}` : ''} · ${give ? `${esc(give.nick)} ${overall(give)}, pot ${give.potential}` : ''}. Gone once the match is queued.</p>
+    </div>
     <div class="row">
       <button class="btn primary" type="button" data-act="trade-accept" data-id="${offer.id}">Accept</button>
       <button class="btn" type="button" data-act="trade-decline" data-id="${offer.id}">Decline</button>
     </div>
   </article>`;
+}
+
+function fixtureKicker(career: Career, foe: { id: string } | null, fixture: { homeId: string; series: number } | null): string {
+  if (!foe || !fixture) return career.stage.kind === 'offseason' ? 'Offseason' : 'This round';
+  const place = foe.id === career.rivalId ? `Rivalry · heat ${career.rivalHeat}` : fixture.homeId === career.playerTeamId ? 'Home' : 'Away';
+  return fixture.series > 1 ? `${place} · best of ${fixture.series}` : place;
+}
+
+function byeTitle(career: Career): string {
+  if (career.stage.kind === 'play-in' && career.playoffs?.seeds.slice(0, 2).includes(career.playerTeamId)) return 'First-round bye';
+  return 'You watch this round';
+}
+
+function byeHook(career: Career): string {
+  if (career.stage.kind === 'play-in' && career.playoffs?.seeds.slice(0, 2).includes(career.playerTeamId)) {
+    return 'Seeds one and two wait. The play-in decides who you meet.';
+  }
+  return 'Your roster is not in it. The other series still count.';
 }
 
 function awardBlock(career: Career): string {
@@ -279,29 +392,22 @@ function officeScreen(app: AppState): string {
   const career = app.career;
   if (!career) return '';
   const team = playerTeam(career);
-  const week = describeWeek(career);
   const fixture = findPlayerFixture(career);
   const standing = playerStanding(career);
   const place = playerPlace(career);
   const foe = fixture ? teamById(career, opponentOf(fixture, team.id)) : null;
-  const practice = practiceBlock(career);
   const trade = tradeBlock(career);
-  const room = roomBlock(career);
-  return `<section class="desk">
-    ${career.patchUnread ? `<article class="banner span-2"><div><p class="kicker">Patch ${esc(career.patchName)}</p><p>${career.patchNotes.map((line) => esc(line)).join(' ') || 'A quiet rift.'}</p></div><button class="btn" type="button" data-act="dismiss-patch">Noted</button></article>` : ''}
-    <article class="matchup">
+  const plan = planBlock(career);
+  return `<section class="desk week">
+    ${officeScene(career)}
+    <article class="fixture">
       <div>
-        <p class="kicker">${foe ? (fixture?.homeId === team.id ? 'Home' : 'Away') : 'No match'}</p>
-        <h1>${foe ? `vs ${esc(foe.name)}` : career.stage.kind === 'offseason' ? 'The season is over' : 'Open week'}</h1>
-        <p class="hook">${esc(raceLine(career))}</p>
+        <p class="kicker">${fixtureKicker(career, foe, fixture)}</p>
+        <h1>${foe ? esc(foe.name) : career.stage.kind === 'offseason' ? 'The market is open' : byeTitle(career)}</h1>
+        <p class="hook">${foe || career.stage.kind === 'offseason' ? esc(raceLine(career)) : esc(byeHook(career))}</p>
         ${streakCopy(career.streak ?? 0) ? `<p class="${(career.streak ?? 0) > 0 ? 'streak-hot' : 'streak-cold'}">${esc(streakCopy(career.streak ?? 0))}</p>` : ''}
-        ${bountyLine(career)}
-        ${foe && foe.id === career.rivalId ? `<p class="rival">Rivalry week against ${esc(foe.name)}. Heat ${career.rivalHeat}. A win here pays extra fans and turns the heat up.</p>` : `<p class="muted">Rivalry with ${esc(teamById(career, career.rivalId).name)} sits at heat ${career.rivalHeat}.</p>`}
-        <p>${foe ? esc(foe.blurb) : 'Use the week to train, or open the offseason market.'}</p>
-        <div class="row">
-          ${career.stage.kind === 'offseason' ? '<button class="btn primary" type="button" data-act="goto" data-screen="offseason">Open offseason</button>' : '<button class="btn primary" type="button" data-act="goto" data-screen="match">Match day</button>'}
-          <button class="btn" type="button" data-act="goto" data-screen="roster">Set training</button>
-        </div>
+        ${career.stage.kind === 'offseason' ? '<div class="row"><button class="btn primary" type="button" data-act="goto" data-screen="offseason">Open the market</button></div>' : ''}
+        ${!foe && career.stage.kind !== 'offseason' ? '<div class="row"><button class="btn primary" type="button" data-act="play">Let the week play</button></div>' : ''}
       </div>
       <dl class="stats">
         <div><dt>Record</dt><dd>${standing.wins}-${standing.losses}</dd></div>
@@ -309,24 +415,22 @@ function officeScreen(app: AppState): string {
         <div><dt>Chemistry</dt><dd>${Math.round(team.chemistry)}</dd></div>
         <div><dt>Payroll</dt><dd>${money(payroll(career))}</dd></div>
       </dl>
+      ${bountyLine(career)}
     </article>
-    ${room || practice || trade ? `<div class="desk-rail">${room}${practice}${trade}</div>` : ''}
+    ${plan}
+    ${trade}
+    ${career.patchUnread ? `<article class="banner"><div><p class="kicker">Patch ${esc(career.patchName)}</p><p>${career.patchNotes.map((line) => esc(line)).join(' ') || 'A quiet rift.'}</p></div><button class="btn" type="button" data-act="dismiss-patch">Noted</button></article>` : ''}
     ${awardBlock(career)}
-    <div class="split span-2">
+    <div class="split shelf">
       <article class="panel">
         <h2>Season goals</h2>
         <ul class="goals">${career.goals.map((goal) => `<li class="${goal.done ? 'done' : ''}">${esc(goal.text)}</li>`).join('')}</ul>
       </article>
       <article class="panel">
         <h2>Wire</h2>
-        <ul class="news">${career.news.slice(0, 6).map((item) => `<li>${esc(item.text)}</li>`).join('') || '<li>The garage is quiet.</li>'}</ul>
+        <ul class="news">${career.news.slice(0, 5).map((item) => `<li>${esc(item.text)}</li>`).join('') || '<li>The garage is quiet.</li>'}</ul>
       </article>
     </div>
-    <article class="panel how span-2">
-      <h2>How a week works</h2>
-      <p>Answer the room, clear the bounty, then queue the match. A promised start has to be kept. Players grow the champion they are studying, and two players who cannot stand each other make the series harder. Trade calls expire when the match is queued.</p>
-      ${week ? '' : ''}
-    </article>
     ${career.history.length ? `<article class="panel span-2"><h2>Previous seasons</h2><ul class="news">${career.history.map((season) => `<li>Season ${season.year}: ${season.wins}-${season.losses}, Cup ${esc(season.cup)}, Playoffs ${esc(season.playoff)}, MVP ${esc(season.mvp)}</li>`).join('')}</ul></article>` : ''}
     ${app.confirmAbandon ? '<button class="btn danger span-2" type="button" data-act="abandon">Confirm abandon career</button>' : '<button class="btn ghost span-2" type="button" data-act="ask-abandon">Abandon career</button>'}
   </section>`;
@@ -337,13 +441,7 @@ function rosterScreen(app: AppState): string {
   if (!career) return '';
   const team = playerTeam(career);
   return `<section class="stack">
-    <header class="section-head"><h1>Roster</h1><p>Four on the main roster. Two in development, for injuries, fatigue, and the weeks the meta passes your starters by.</p></header>
-    <article class="panel">
-      <h2>This week's training</h2>
-      <div class="choice">${TRAINING.map((focus) => `<button type="button" class="${team.training === focus.id ? 'on' : ''}" data-act="training" data-focus="${focus.id}"><strong>${focus.name}</strong><span>${focus.text}</span></button>`).join('')}</div>
-      ${team.training === 'champion' ? `<label class="inline">Champion<select id="training-champ" name="champion" data-act="training-champ">${CHAMPIONS.map((champion) => `<option value="${champion.id}" ${team.trainingChamp === champion.id ? 'selected' : ''}>${esc(champion.name)}</option>`).join('')}</select></label>` : ''}
-      ${team.facility < 4 && team.training === 'academy' ? '<p class="warn">Prospects are still on leftover PCs. The Academy Wing is where this focus starts to matter.</p>' : ''}
-    </article>
+    <header class="section-head"><h1>Roster</h1></header>
     <h2>Main roster</h2>
     <div class="roster-grid main">${team.main.map((id) => playerCard(career, id, team.dev)).join('')}</div>
     <h2>Development team</h2>
@@ -351,9 +449,19 @@ function rosterScreen(app: AppState): string {
   </section>`;
 }
 
+function rosterNote(career: Career, player: Player): string {
+  if (player.injured) return `Out ${player.injured}`;
+  if (career.promiseId === player.id) return 'Promised the start';
+  if (player.sat >= 2) return 'Wants minutes';
+  const best = bestMasteryId(player);
+  if (player.study && player.study !== best) return `Studying ${champName(player.study)}`;
+  return '';
+}
+
 function playerCard(career: Career, id: string, swapWith: string[]): string {
   const player = career.players[id];
   const best = bestMasteryId(player);
+  const note = rosterNote(career, player);
   return `<article class="player-card">
     <button class="portrait-btn" type="button" data-act="select-player" data-id="${id}">${art(player.portrait, player.nick)}</button>
     <div class="ovr-badge">${overall(player)}<small>OVR</small></div>
@@ -361,9 +469,9 @@ function playerCard(career: Career, id: string, swapWith: string[]): string {
       <div class="row spread"><strong>${esc(player.nick)}</strong>${roleTag(player.role)}</div>
       <span class="muted">${esc(player.name)} · ${player.age}</span>
       <p>${esc(TRAIT_COPY[player.trait].name)} · ${esc(champName(best))} ${player.mastery[best] ?? 0}</p>
-      <p class="muted">Studying ${esc(champName(player.study || best))}${career.promiseId === id ? ' · promised the start' : ''}${player.sat >= 2 ? ' · wants minutes' : ''}</p>
+      ${note ? `<p class="scrim-note">${esc(note)}</p>` : ''}
       <div class="meters-mini"><span>Morale ${Math.round(player.morale)}</span>${bar(player.morale)}<span>Fatigue ${Math.round(player.fatigue)}</span>${bar(player.fatigue, 100, 'fatigue')}</div>
-      <span class="muted">${player.contractStatus === 'expiring' ? 'Contract expired' : `${player.contractYears}y · ${money(player.salary)}/wk`}${player.injured ? ` · out ${player.injured}` : ''}</span>
+      <span class="muted">${player.contractStatus === 'expiring' ? 'Contract expired' : `${player.contractYears}y · ${money(player.salary)}/wk`}</span>
       <div class="row wrap">${swapWith.map((other) => `<button class="btn tiny" type="button" data-act="swap" data-a="${id}" data-b="${other}">Swap ${esc(career.players[other].nick)}</button>`).join('')}</div>
     </div>
   </article>`;
@@ -376,11 +484,8 @@ function playerScreen(app: AppState): string {
   const masteries = Object.entries(player.mastery).sort((a, b) => b[1] - a[1]);
   return `<section class="stack">
     <button class="btn ghost tiny" type="button" data-act="goto" data-screen="roster">Back to roster</button>
-    <article class="detail">
-      ${art(player.portrait, player.nick, 'tall')}
-      <div>
-        <p class="kicker">${roleTag(player.role)} ${esc(TRAIT_COPY[player.trait].name)}</p>
-        <h1>${esc(player.nick)}</h1>
+    ${scene(career, { speakerId: player.id, text: confidantLine(career, player.id) }, { slim: true })}
+    <article class="panel">
         <p>${esc(player.name)}, ${player.age}. ${esc(TRAIT_COPY[player.trait].text)}</p>
         <dl class="stats">
           <div><dt>Overall</dt><dd>${overall(player)}</dd></div>
@@ -393,22 +498,22 @@ function playerScreen(app: AppState): string {
         ${statLine('Teamwork', player.teamwork)}
         ${statLine('Clutch', player.clutch)}
         <h2>Study</h2>
-        <p class="muted">The champion they queue in auto draft, and the one that gains extra mastery when they play it. Locked champions in the study also hit a little harder.</p>
+        <p class="muted">Auto draft queues this. Playing it, or locking it, hits a little harder.</p>
         <div class="row wrap">${roleChamps(player.role).map((id) => `<button type="button" class="btn tiny ${player.study === id ? 'on' : ''}" data-act="study" data-id="${player.id}" data-champ="${id}">${esc(champName(id))}</button>`).join('')}</div>
         ${rosterIds(playerTeam(career)).includes(player.id) && career.stage.kind !== 'offseason' ? `<div class="row"><button class="btn ${career.promiseId === player.id ? 'on' : ''}" type="button" data-act="promise" data-id="${player.id}">${career.promiseId === player.id ? 'Pull the promise' : 'Promise the start'}</button></div>` : ''}
-        <h2>The room</h2>
+        <h2>Links</h2>
         <ul class="news">${rosterIds(playerTeam(career))
           .filter((id) => id !== player.id)
           .map((id) => {
             const bond = readTie(career, player.id, id);
             const word = bond >= 2 ? 'close' : bond === 1 ? 'easy' : bond === 0 ? 'neutral' : bond === -1 ? 'cool' : 'friction';
-            return `<li class="${bond > 0 ? 'streak-hot' : bond < 0 ? 'streak-cold' : ''}">${esc(career.players[id].nick)} · ${word}</li>`;
+            const rank = bond >= 2 ? 5 : bond === 1 ? 4 : bond === 0 ? 3 : bond === -1 ? 2 : 1;
+            return `<li class="${bond > 0 ? 'streak-hot' : bond < 0 ? 'streak-cold' : ''}">${esc(career.players[id].nick)} · ${word} ${pips(rank)}</li>`;
           })
           .join('')}</ul>
         <h2>Champion pool</h2>
         ${masteries.map(([id, value]) => `<label>${esc(champName(id))} · ${masteryLabel(value)} ${bar(value)}</label>`).join('')}
         <p class="muted">Season ${player.seasonGames} games, ${player.seasonWins} series wins, ${player.seasonMvps} MVPs. Career MVPs ${player.careerMvps}.</p>
-      </div>
     </article>
   </section>`;
 }
@@ -431,7 +536,7 @@ function championScreen(app: AppState): string {
     .sort((a, b) => b.value - a.value);
   const score = selected.base + (career.patch[selected.id] ?? 0);
   return `<section class="stack">
-    <header class="section-head"><h1>Champion codex</h1><p>Twelve mythics. Three Norse, three Egyptian, three Greek, three Japanese. A 3v3 locks one warden, one slayer, one weaver.</p></header>
+    <header class="section-head"><h1>Champion codex</h1></header>
     <div class="filters">
       ${myths.map((myth) => `<button type="button" class="${app.champMyth === myth ? 'on' : ''}" data-act="myth-filter" data-myth="${myth}">${myth === 'all' ? 'All myths' : MYTH_LABEL[myth]}</button>`).join('')}
       ${roles.map((role) => `<button type="button" class="${app.champRole === role ? 'on' : ''}" data-act="role-filter" data-role="${role}">${role === 'all' ? 'All roles' : ROLE_LABEL[role]}</button>`).join('')}
@@ -497,46 +602,23 @@ function matchScreen(app: AppState): string {
   }
   const foeRecord = standingsFor(career, 'regular').find((row) => row.teamId === foe.id);
   return `<section class="stack draft">
-    <header class="section-head">
+    <header class="fixture draft-head">
       <div>
-        <p class="kicker">${foe.id === career.rivalId ? `Rivalry week · heat ${career.rivalHeat}` : fixture.homeId === team.id ? 'Home' : 'Away'}</p>
+        <p class="kicker">${foe.id === career.rivalId ? `Rivalry · heat ${career.rivalHeat}` : fixture.homeId === team.id ? 'Home' : 'Away'} · ${fixture.series === 1 ? 'one game' : `best of ${fixture.series}`}</p>
         <h1>${esc(foe.name)}</h1>
-        <p>${fixture.homeId === team.id ? 'Home' : 'Away'} on Spire Rift — one lane, Ash Path, Mirror Path, and the Worldheart pit. Series length ${fixture.series === 1 ? 'one game' : `best of ${fixture.series}`}.</p>
-        ${streakCopy(career.streak ?? 0) ? `<p class="${(career.streak ?? 0) > 0 ? 'streak-hot' : 'streak-cold'}">${esc(streakCopy(career.streak ?? 0))}</p>` : ''}
-        ${career.promiseId && career.players[career.promiseId] ? `<p class="streak-hot">${esc(career.players[career.promiseId].nick)} is promised this series.</p>` : ''}
+        <p class="hook">${esc(edge)}. ${foeRecord ? `${foeRecord.wins}-${foeRecord.losses}` : '0-0'}.</p>
+        ${career.planNote ? `<p class="scrim-note">${esc(career.planNote)}</p>` : ''}
+        ${bountyLine(career)}
       </div>
-      ${bountyLine(career)}
     </header>
-    <div class="split">
-      <article class="panel">
-        <h2>Scouting · ${esc(facilityAt(foe.facility).name)}</h2>
-        <p>${esc(foe.blurb)}</p>
-        <p>${foe.city} · ${foeRecord ? `${foeRecord.wins}-${foeRecord.losses}` : '0-0'} · coach's read: <strong>${esc(edge)}</strong></p>
-        ${scout >= 1 || career.intel[foe.id] ? `<p>They like to ${esc(foe.strategy)}. A ${esc(counterStrategy(foe.strategy))} plan is the textbook answer.</p>${career.intel[foe.id] && scout < 1 ? '<p class="muted">You scrimmed them. The habit is no longer a guess.</p>' : ''}` : '<p class="muted">Upgrade out of the garage, or scrim them, to read their habits. Until then, trust the edge label and experiment.</p>'}
-        ${scout >= 2 ? `<ul class="news">${chooseNames(career, foe).map((line) => `<li>${line}</li>`).join('')}</ul>` : ''}
-        ${scout >= 3 ? `<p class="muted">Likely bans and locks update after you ban. Their ban this draft: ${esc(champName(theirBan))}.</p>` : `<p>Their ban: <strong>${esc(champName(theirBan))}</strong></p>`}
-      </article>
-      <article class="panel">
-        <h2>Coach</h2>
-        <ul class="news">${coachNotes(career, foe.strategy).map((line) => `<li>${esc(line)}</li>`).join('')}</ul>
-        ${problems.map((problem) => `<p class="warn">${esc(problem)}</p>`).join('')}
-      </article>
-    </div>
-    <article class="panel">
-      <h2>Your ban</h2>
-      <div class="ban-row">${CHAMPIONS.map((champion) => `<button type="button" class="ban ${career.lineup.ban === champion.id ? 'mine' : ''} ${theirBan === champion.id ? 'theirs' : ''}" data-act="ban" data-id="${champion.id}">${art(champion.art, champion.name)}<span>${esc(champion.name)}</span></button>`).join('')}</div>
-      <p class="muted">Gold ring is your ban. Violet ring is theirs.</p>
-    </article>
+    ${scene(career, draftSpeech(career), { slim: true })}
     <div class="slot-row">
       ${[0, 1, 2].map((index) => slotCard(career, index, app.selectedSlot === index)).join('')}
     </div>
     <article class="panel">
-      <h2>Bench and call-ups</h2>
-      <div class="row wrap">${rosterIds(team).map((id) => {
-        const player = career.players[id];
-        const queued = career.lineup.playerIds.includes(id);
-        return `<button type="button" class="btn ${queued ? 'on' : ''}" data-act="assign-player" data-id="${id}">${esc(player.nick)} · ${ROLE_LABEL[player.role]} · fat ${Math.round(player.fatigue)}${player.injured ? ' · hurt' : ''}${team.dev.includes(id) ? ' · dev' : ''}</button>`;
-      }).join('')}</div>
+      <h2>Your ban</h2>
+      <p class="muted">Gold is yours. Violet is ${esc(foe.tag)}. Theirs is ${esc(champName(theirBan))}.</p>
+      <div class="ban-row">${CHAMPIONS.map((champion) => `<button type="button" class="ban ${career.lineup.ban === champion.id ? 'mine' : ''} ${theirBan === champion.id ? 'theirs' : ''}" data-act="ban" data-id="${champion.id}">${art(champion.art, champion.name)}<span>${esc(champion.name)}</span></button>`).join('')}</div>
     </article>
     <article class="panel">
       <h2>Lock a champion${active ? ` for ${esc(active.nick)}` : ''}</h2>
@@ -554,9 +636,32 @@ function matchScreen(app: AppState): string {
       <h2>Strategy</h2>
       <div class="choice">${STRATEGIES.map((strategy) => `<button type="button" class="${career.lineup.strategy === strategy.id ? 'on' : ''}" data-act="strategy" data-strategy="${strategy.id}"><strong>${strategy.name}</strong><span>${strategy.text}</span></button>`).join('')}</div>
     </article>
+    <article class="panel bench">
+      <h2>The other three</h2>
+      <div class="row wrap">${rosterIds(team).map((id) => {
+        const player = career.players[id];
+        const queued = career.lineup.playerIds.includes(id);
+        return `<button type="button" class="btn ${queued ? 'on' : ''}" data-act="assign-player" data-id="${id}">${esc(player.nick)} · ${ROLE_LABEL[player.role]} · fat ${Math.round(player.fatigue)}${player.injured ? ' · hurt' : ''}${team.dev.includes(id) ? ' · dev' : ''}</button>`;
+      }).join('')}</div>
+    </article>
     <div class="queue">
       <button class="btn" type="button" data-act="autofill">Auto draft</button>
       <button class="btn primary" type="button" data-act="play">Queue the match</button>
+    </div>
+    <div class="split appendix">
+      <article class="panel">
+        <h2>Scouting · ${esc(facilityAt(foe.facility).name)}</h2>
+        <p>${esc(foe.blurb)}</p>
+        <p>${foe.city} · ${foeRecord ? `${foeRecord.wins}-${foeRecord.losses}` : '0-0'} · coach's read: <strong>${esc(edge)}</strong></p>
+        ${scout >= 1 || career.intel[foe.id] ? `<p>They like to ${esc(foe.strategy)}. A ${esc(counterStrategy(foe.strategy))} plan is the textbook answer.</p>${career.intel[foe.id] && scout < 1 ? '<p class="muted">You scrimmed them. The habit is no longer a guess.</p>' : ''}` : '<p class="muted">Upgrade out of the garage, or scrim them, to read their habits. Until then, trust the edge label and experiment.</p>'}
+        ${scout >= 2 ? `<ul class="news">${chooseNames(career, foe).map((line) => `<li>${line}</li>`).join('')}</ul>` : ''}
+        <p>Their ban: <strong>${esc(champName(theirBan))}</strong></p>
+      </article>
+      <article class="panel">
+        <h2>Coach</h2>
+        <ul class="news">${coachNotes(career, foe.strategy).map((line) => `<li>${esc(line)}</li>`).join('')}</ul>
+        ${problems.map((problem) => `<p class="warn">${esc(problem)}</p>`).join('')}
+      </article>
     </div>
   </section>`;
 }
@@ -591,26 +696,28 @@ function resultScreen(app: AppState): string {
   const offseason = career.stage.kind === 'offseason';
   return `<section class="stack scoreboard ${tone}">
     <p class="kicker">${esc(report.label)} · ${esc(kind)}</p>
-    <h1>${report.won === undefined ? 'Week complete' : report.won ? 'Victory' : 'Defeat'}${streakMark} ${report.scoreline ? esc(report.scoreline) : ''}</h1>
+    <h1>${report.won === undefined ? (report.kind === 'bye' ? 'Bye' : 'Week complete') : report.won ? 'Victory' : 'Defeat'}${streakMark}${report.scoreline ? ` ${esc(report.scoreline)}` : ''}</h1>
     <p>${report.opponentName ? `${report.home ? 'Home' : 'Away'} against ${esc(report.opponentName)}.` : ''} ${report.mvpName ? `${esc(report.mvpName)} takes MVP.` : ''}</p>
     <div class="pills"><span>${money(report.cashDelta)} cash</span><span>${report.fansDelta >= 0 ? '+' : ''}${report.fansDelta} fans</span>${report.bountyNote?.startsWith('Bounty cleared') ? '<span>Bounty paid</span>' : ''}</div>
+    ${scene(career, tapeSpeech(career, report), { slim: true })}
+    <button class="btn primary next-week" type="button" data-act="dismiss-result">${offseason ? 'Open the market' : 'Next week'}</button>
     <article class="panel pulse">
       <p class="kicker">${offseason ? 'The market' : 'Next week'}</p>
       <p class="hook-next">${esc(report.nextHook ?? 'The week is open.')}</p>
+      ${report.planNote ? `<p>${esc(report.planNote)}</p>` : ''}
       ${report.raceLine ? `<p class="hook">${esc(report.raceLine)}</p>` : ''}
       ${streakCopy(streak) ? `<p class="${streak > 0 ? 'streak-hot' : 'streak-cold'}">${esc(streakCopy(streak))}</p>` : ''}
       ${report.bountyNote ? `<p class="${report.bountyNote.startsWith('Bounty cleared') ? 'scrim-note' : 'warn'}">${esc(report.bountyNote)}</p>` : ''}
       ${report.roomNote ? `<p>${esc(report.roomNote)}</p>` : ''}
-      ${growth.length ? `<ul class="growth">${growth.map((line) => `<li><strong>${esc(line.nick)}</strong><span>${esc(line.text)}</span></li>`).join('')}</ul>` : '<p class="muted">No one jumped a number this week. The next block of training is where that changes.</p>'}
+      ${growth.length ? `<ul class="growth">${growth.map((line) => `<li><strong>${esc(line.nick)}</strong><span>${esc(line.text)}</span></li>`).join('')}</ul>` : ''}
     </article>
     ${report.notes.map((line) => `<p>${esc(line)}</p>`).join('')}
     ${report.patchNotes.length ? `<article class="banner"><div><p class="kicker">Patch ${esc(career.patchName)}</p><p>${report.patchNotes.map((line) => esc(line)).join(' ')}</p></div></article>` : ''}
-    ${report.games.map((game, index) => `<article class="panel">
+    ${report.games.map((game, index) => `<article class="panel tape-log">
       <h2>Game ${index + 1} · ${esc(game.time)} · ${game.winnerId === career.playerTeamId ? 'Win' : 'Loss'}</h2>
       <p>${game.homeKills}–${game.awayKills} kills · Worldheart ${game.homeHeart}–${game.awayHeart} · gold ${Math.round(game.homeGold / 1000)}k–${Math.round(game.awayGold / 1000)}k</p>
       <ol class="timeline">${game.timeline.map((beat) => `<li><time>${esc(beat.t)}</time><span>${esc(beat.text)}</span></li>`).join('')}</ol>
     </article>`).join('')}
-    <button class="btn primary" type="button" data-act="dismiss-result">${offseason ? 'Open the market' : 'Next week'}</button>
   </section>`;
 }
 
@@ -643,18 +750,21 @@ function leagueScreen(app: AppState): string {
 function standingsTab(career: Career): string {
   const rows = standingsFor(career, 'regular');
   const rank = rankTeams(career);
-  return `<article class="panel"><h1>Regular season</h1><p>Top six reach the playoffs. Seeds 1 and 2 get a bye. The Spire Cup is a separate table.</p>
+  const fixture = findPlayerFixture(career);
+  const foeId = fixture ? opponentOf(fixture, career.playerTeamId) : '';
+  return `<article class="panel"><p class="kicker">Playoff line under 6 · bye for 1 and 2</p><h1>Regular season</h1>
     <table><thead><tr><th></th><th>Team</th><th class="num">W</th><th class="num">L</th><th class="num">Diff</th><th>Facility</th></tr></thead><tbody>
     ${rank.map((id, index) => {
       const team = teamById(career, id);
       const row = rows.find((entry) => entry.teamId === id);
-      return `<tr class="${index === 5 ? 'cut' : ''} ${team.player ? 'you' : ''}"><td>${index + 1}</td><td><button type="button" data-act="view-team" data-id="${id}">${esc(team.name)}</button></td><td class="num">${row?.wins ?? 0}</td><td class="num">${row?.losses ?? 0}</td><td class="num">${row?.diff ?? 0}</td><td>${esc(facilityAt(team.facility).name)}</td></tr>`;
+      return `<tr class="${index === 6 ? 'cut' : ''} ${team.player ? 'you' : ''} ${id === foeId ? 'foe' : ''}"><td>${index + 1}</td><td><button type="button" data-act="view-team" data-id="${id}">${esc(team.name)}</button></td><td class="num">${row?.wins ?? 0}</td><td class="num">${row?.losses ?? 0}</td><td class="num">${row?.diff ?? 0}</td><td>${esc(facilityAt(team.facility).name)}</td></tr>`;
     }).join('')}
     </tbody></table></article>`;
 }
 
 function scheduleTab(career: Career): string {
   const team = playerTeam(career);
+  const current = career.stage.kind === 'regular' ? career.stage.round : -1;
   const rounds = career.regularRounds.map((round, index) => {
     const pair = round.find(([home, away]) => home === team.id || away === team.id);
     if (!pair) return '';
@@ -662,9 +772,27 @@ function scheduleTab(career: Career): string {
     const foe = teamById(career, home ? pair[1] : pair[0]);
     const log = career.results.find((result) => result.season === career.year && result.kind === 'regular' && result.homeId === pair[0] && result.awayId === pair[1]);
     const score = log ? `${log.winnerId === team.id ? 'W' : 'L'} ${home ? log.homeKills : log.awayKills}–${home ? log.awayKills : log.homeKills}` : 'Upcoming';
-    return `<li><span>Week ${index + 1} · ${home ? 'Home' : 'Away'}</span><strong>${esc(foe.name)}</strong><em>${score}</em></li>`;
+    return `<li class="${index === current ? 'now' : ''}"><span>Week ${index + 1} · ${home ? 'Home' : 'Away'}</span><strong>${esc(foe.name)}</strong><em>${score}</em></li>`;
   });
   return `<article class="panel"><h1>Circuit schedule</h1><ol class="schedule">${rounds.join('')}</ol></article>`;
+}
+
+function seriesCard(
+  career: Career,
+  label: string,
+  series: { homeId: string; awayId: string; homeWins: number; awayWins: number; done: boolean } | null
+): string {
+  if (!series) return '';
+  const home = teamById(career, series.homeId);
+  const away = teamById(career, series.awayId);
+  const yours = series.homeId === career.playerTeamId || series.awayId === career.playerTeamId;
+  const homeWin = series.done && series.homeWins > series.awayWins;
+  const awayWin = series.done && series.awayWins > series.homeWins;
+  return `<article class="series-card${yours ? ' yours' : ''}">
+    <p class="kicker">${esc(label)}${series.done ? '' : ' · scheduled'}</p>
+    <div class="series-row${homeWin ? ' win' : ''}"><strong>${esc(home.name)}</strong><span>${series.homeWins}</span></div>
+    <div class="series-row${awayWin ? ' win' : ''}"><strong>${esc(away.name)}</strong><span>${series.awayWins}</span></div>
+  </article>`;
 }
 
 function cupTab(career: Career): string {
@@ -675,30 +803,24 @@ function cupTab(career: Career): string {
     return `<div><h2>${title}</h2><table><tbody>${rank.map((id, index) => {
       const row = rows.find((entry) => entry.teamId === id);
       const team = teamById(career, id);
-      return `<tr class="${index < 2 ? 'in' : ''}"><td>${esc(team.tag)}</td><td>${row?.wins ?? 0}-${row?.losses ?? 0}</td><td>${row?.diff ?? 0}</td></tr>`;
+      return `<tr class="${id === career.playerTeamId ? 'you' : ''} ${index < 2 ? 'in' : ''}"><td>${esc(team.tag)}</td><td>${row?.wins ?? 0}-${row?.losses ?? 0}</td><td>${row?.diff ?? 0}</td></tr>`;
     }).join('')}</tbody></table></div>`;
   };
-  const seriesLine = (series: { homeId: string; awayId: string; homeWins: number; awayWins: number; done: boolean } | null, label: string) => {
-    if (!series) return '';
-    return `<li>${label}: ${esc(teamById(career, series.homeId).tag)} ${series.homeWins}–${series.awayWins} ${esc(teamById(career, series.awayId).tag)}${series.done ? '' : ' · scheduled'}</li>`;
-  };
-  return `<article class="panel"><h1>Spire Cup</h1><p>${esc(career.cupResult)}${career.cup.championId ? ` · ${esc(teamById(career, career.cup.championId).name)}` : ''}</p>
+  return `<article class="panel"><p class="kicker">${esc(career.cupResult)}${career.cup.championId ? ` · ${esc(teamById(career, career.cup.championId).name)}` : ''}</p><h1>Spire Cup</h1>
     <div class="split">${table(career.cup.groups.a, 'Group A')}${table(career.cup.groups.b, 'Group B')}</div>
-    <ul class="news">${career.cup.semis.map((series, index) => seriesLine(series, `Semi ${index + 1}`)).join('')}${seriesLine(career.cup.final, 'Final')}</ul>
+    <div class="bracket">${career.cup.semis.map((series, index) => seriesCard(career, `Semi ${index + 1}`, series)).join('')}${seriesCard(career, 'Final', career.cup.final)}</div>
   </article>`;
 }
 
 function playoffTab(career: Career): string {
   if (!career.playoffs) return `<article class="panel"><h1>Playoffs</h1><p>Top six after the regular season. Seeds 1 and 2 wait. 3 plays 6, 4 plays 5, then the semifinals and a best-of-five final.</p></article>`;
-  const line = (label: string, series: { homeId: string; awayId: string; homeWins: number; awayWins: number; done: boolean } | null) =>
-    series ? `<li><strong>${label}</strong> ${esc(teamById(career, series.homeId).name)} ${series.homeWins}–${series.awayWins} ${esc(teamById(career, series.awayId).name)}</li>` : '';
-  return `<article class="panel"><h1>Playoffs</h1><p>${esc(career.playoffResult)}${career.playoffs.championId ? ` · Champion ${esc(teamById(career, career.playoffs.championId).name)}` : ''}</p>
-    <ol class="seeds">${career.playoffs.seeds.map((id, index) => `<li>${index + 1}. ${esc(teamById(career, id).name)}</li>`).join('')}</ol>
-    <ul class="news">
-      ${career.playoffs.playIn.map((series, index) => line(`Play-in ${index + 1}`, series)).join('')}
-      ${career.playoffs.semis.map((series, index) => line(`Semifinal ${index + 1}`, series)).join('')}
-      ${line('Final', career.playoffs.final)}
-    </ul>
+  return `<article class="panel"><p class="kicker">${esc(career.playoffResult)}${career.playoffs.championId ? ` · ${esc(teamById(career, career.playoffs.championId).name)}` : ''}</p><h1>Playoffs</h1>
+    <ol class="seeds">${career.playoffs.seeds.map((id, index) => `<li class="${id === career.playerTeamId ? 'you' : ''}">${index + 1}. ${esc(teamById(career, id).name)}</li>`).join('')}</ol>
+    <div class="bracket">
+      ${career.playoffs.playIn.map((series, index) => seriesCard(career, `Play-in ${index + 1}`, series)).join('')}
+      ${career.playoffs.semis.map((series, index) => seriesCard(career, `Semifinal ${index + 1}`, series)).join('')}
+      ${seriesCard(career, 'Final', career.playoffs.final)}
+    </div>
   </article>`;
 }
 
@@ -730,19 +852,23 @@ function facilityScreen(app: AppState): string {
   const current = facilityAt(team.facility);
   const next = FACILITIES[team.facility + 1];
   return `<section class="stack">
-    <header class="section-head"><h1>${esc(current.name)}</h1><p>${esc(current.scene)}</p></header>
-    <article class="panel facility-now">
-      <p>${esc(current.unlock)}</p>
+    <article class="fixture">
+      <div>
+        <p class="kicker">House</p>
+        <h1>${esc(current.name)}</h1>
+        <p class="hook">${esc(current.scene)}</p>
+        <p class="muted">${esc(current.unlock)}</p>
+        ${next ? `<button class="btn primary" type="button" data-act="upgrade" ${team.cash < next.cost ? 'disabled' : ''}>Upgrade to ${esc(next.name)} · ${money(next.cost)}</button>` : '<p>The facility is complete.</p>'}
+        ${next && team.cash < next.cost ? `<p class="muted">Need ${money(next.cost - team.cash)} more.</p>` : ''}
+      </div>
       <dl class="stats">
         <div><dt>Training</dt><dd>${current.training.toFixed(2)}×</dd></div>
         <div><dt>Recovery</dt><dd>${current.recovery.toFixed(2)}×</dd></div>
         <div><dt>Revenue</dt><dd>${current.revenue.toFixed(2)}×</dd></div>
         <div><dt>Upkeep</dt><dd>${money(current.upkeep)}</dd></div>
       </dl>
-      ${next ? `<button class="btn primary" type="button" data-act="upgrade" ${team.cash < next.cost ? 'disabled' : ''}>Upgrade to ${esc(next.name)} · ${money(next.cost)}</button>` : '<p>The facility is complete.</p>'}
-      ${next && team.cash < next.cost ? `<p class="muted">Need ${money(next.cost - team.cash)} more.</p>` : ''}
     </article>
-    <ol class="facility-path">${FACILITIES.map((facility, index) => `<li class="${index === team.facility ? 'now' : ''} ${index < team.facility ? 'done' : ''}"><strong>${esc(facility.name)}</strong><span>${esc(facility.scene)}</span>${index > 0 ? `<em>${money(facility.cost)}</em>` : ''}</li>`).join('')}</ol>
+    <ol class="facility-path">${FACILITIES.map((facility, index) => `<li class="${index === team.facility ? 'now' : ''} ${index < team.facility ? 'done' : ''}"><strong>${esc(facility.name)}</strong><span>${index === team.facility ? 'You are here' : esc(facility.scene)}</span>${index > 0 ? `<em>${money(facility.cost)}</em>` : ''}</li>`).join('')}</ol>
   </section>`;
 }
 
@@ -753,7 +879,18 @@ function financeScreen(app: AppState): string {
   const facility = facilityAt(team.facility);
   const sponsor = Math.round((1500 + team.reputation * 55) * facility.revenue);
   return `<section class="stack">
-    <header class="section-head"><h1>${money(team.cash)}</h1><p>${esc(facility.name)} multiplies sponsorship and match day by ${facility.revenue.toFixed(2)}. Weekly payroll is ${money(payroll(career))} plus ${money(facility.upkeep)} upkeep. Sponsor this week is about ${money(sponsor)}.</p></header>
+    <article class="fixture">
+      <div>
+        <p class="kicker">${esc(facility.name)} · revenue ${facility.revenue.toFixed(2)}×</p>
+        <h1>${money(team.cash)}</h1>
+      </div>
+      <dl class="stats">
+        <div><dt>Payroll</dt><dd>${money(payroll(career))}</dd></div>
+        <div><dt>Upkeep</dt><dd>${money(facility.upkeep)}</dd></div>
+        <div><dt>Sponsor</dt><dd>${money(sponsor)}</dd></div>
+        <div><dt>Fans</dt><dd>${team.fans.toLocaleString('en-US')}</dd></div>
+      </dl>
+    </article>
     <article class="panel">
       <h2>Roster salaries</h2>
       <table><tbody>${rosterIds(team).map((id) => {
@@ -773,14 +910,29 @@ function offseasonScreen(app: AppState): string {
   }
   const team = playerTeam(career);
   const ready = rosterReady(career);
+  const standing = playerStanding(career);
   return `<section class="stack">
-    <header class="section-head"><h1>Offseason</h1><p>Season ${career.year} finished ${playerStanding(career).wins}-${playerStanding(career).losses}. Cup: ${esc(career.cupResult)}. Playoffs: ${esc(career.playoffResult)}. Re-sign expiring deals, or cut and shop.</p></header>
+    <article class="fixture">
+      <div>
+        <p class="kicker">Season ${career.year}</p>
+        <h1>${standing.wins}–${standing.losses}</h1>
+        <p class="hook">Cup ${esc(career.cupResult)}. Playoffs ${esc(career.playoffResult)}.</p>
+        <p class="muted">Re-sign anyone whose deal expired, then open the next season.</p>
+      </div>
+      <dl class="stats">
+        <div><dt>Place</dt><dd>${playerPlace(career) || '—'}</dd></div>
+        <div><dt>Cash</dt><dd>${money(team.cash)}</dd></div>
+        <div><dt>Payroll</dt><dd>${money(payroll(career))}</dd></div>
+        <div><dt>Fans</dt><dd>${team.fans.toLocaleString('en-US')}</dd></div>
+      </dl>
+    </article>
     ${awardBlock(career)}
+    <h2>Your roster</h2>
     <div class="roster-grid">${rosterIds(team).map((id) => contractCard(career, id)).join('')}</div>
-    <h2>Free agents</h2>
+    <h2>The market</h2>
     <div class="roster-grid">${career.freeAgents.map((id) => freeAgentCard(career, id)).join('') || '<p>The market is empty.</p>'}</div>
-    <button class="btn primary" type="button" data-act="next-season">Begin season ${career.year + 1}</button>
     ${ready ? `<p class="warn">${esc(ready)}</p>` : '<p class="muted">Roster is set. The next patch drops when the new season opens.</p>'}
+    <button class="btn primary next-week" type="button" data-act="next-season">Begin season ${career.year + 1}</button>
   </section>`;
 }
 
@@ -789,7 +941,7 @@ function contractCard(career: Career, id: string): string {
   const team = playerTeam(career);
   const ask = demand(player);
   const severance = player.contractStatus === 'expiring' || player.contractYears <= 0 ? 0 : player.salary * 4 * player.contractYears;
-  return `<article class="player-card"><div class="player-body">
+  return `<article class="player-card market-card">${art(player.portrait, player.nick)}<div class="player-body">
     <strong>${esc(player.nick)}</strong>
     <span>${overall(player)} OVR · pot ${player.potential} · ${ROLE_LABEL[player.role]}</span>
     <span class="muted">${player.contractStatus === 'expiring' ? `Expired · wants ${money(ask)}/wk` : `${player.contractYears}y left · ${money(player.salary)}/wk`}</span>
@@ -803,8 +955,7 @@ function freeAgentCard(career: Career, id: string): string {
   const player = career.players[id];
   const team = playerTeam(career);
   const blocked = overall(player) >= 80 && team.facility < 5;
-  return `<article class="player-card"><div class="player-body">
-    ${art(player.portrait, player.nick)}
+  return `<article class="player-card market-card">${art(player.portrait, player.nick)}<div class="player-body">
     <strong>${esc(player.nick)}</strong>
     <span>${esc(player.name)} · ${player.age} · ${ROLE_LABEL[player.role]}</span>
     <span>${overall(player)} OVR · pot ${player.potential} · ${money(player.salary)}/wk</span>

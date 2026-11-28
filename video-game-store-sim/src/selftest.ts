@@ -11,6 +11,7 @@ import {
   raceLine,
   rankTeams,
   rosterIds,
+  lockPlan,
   rosterReady,
   runCircuitScrim,
   runHouseScrim,
@@ -19,9 +20,10 @@ import {
 } from './game/career.ts';
 import { apply, initialApp } from './game/actions.ts';
 import { FACILITIES } from './game/facilities.ts';
-import { bestChampFor, describeWeek, lineupProblems, suggestBan } from './game/match.ts';
+import { bestChampFor, describeWeek, findPlayerFixture, lineupProblems, suggestBan } from './game/match.ts';
 import { CHAMPIONS } from './game/champions.ts';
 import { overall } from './game/roster.ts';
+import { linkRank, morningLine, roomSpeech, tapeSpeech } from './game/voice.ts';
 import { doubleRoundRobin } from './game/schedule.ts';
 import type { Career } from './game/types.ts';
 
@@ -107,7 +109,24 @@ function run(): void {
   assert(app.career.rivalId === 'iron', 'rival');
   assert(app.career.rivalHeat >= 12, 'rival heat');
   assert(raceLine(app.career).length > 8, 'race line');
+  assert(app.career.plan === null, 'week starts on the plan');
   assert(app.career.room && app.career.room.a.label.length > 2, 'opening room');
+  const spoken = roomSpeech(app.career);
+  assert(spoken && spoken.text.length > 12 && app.career.players[spoken.speakerId], spoken?.text ?? 'room speaks');
+  assert(linkRank(app.career, 'mina') >= 1 && linkRank(app.career, 'mina') <= 5, 'link rank');
+  assert(morningLine(app.career).text.length > 12, 'morning line');
+  const studiedPlan = lockPlan(structuredClone(app.career), 'study');
+  assert(!studiedPlan.error && studiedPlan.career.plan === 'study', studiedPlan.error ?? 'study plan');
+  assert(studiedPlan.career.players.kite.mastery.skadi > app.career.players.kite.mastery.skadi, 'study moved mastery');
+  assert(lockPlan(studiedPlan.career, 'rest').error, 'plan locks once');
+  const rested = lockPlan(structuredClone(app.career), 'rest');
+  assert(!rested.error && rested.career.players.kite.fatigue < app.career.players.kite.fatigue, rested.error ?? 'rest plan');
+  const scrimmed = lockPlan(structuredClone(app.career), 'scrim');
+  assert(!scrimmed.error && scrimmed.career.plan === 'scrim' && scrimmed.career.lastScrim?.kind === 'circuit', scrimmed.error ?? 'scrim plan');
+  assert(scrimmed.career.intel[scrimmed.career.lastScrim?.opponentId ?? ''], 'scrim plan intel');
+  const plannedWeek = playCurrentWeek(autofill(studiedPlan.career));
+  assert(plannedWeek.plan === null, 'plan clears after the match');
+  assert((plannedWeek.lastReport?.planNote ?? '').includes('Study'), 'plan on the tape');
   assert(app.career.players.kite.study === 'skadi', 'kite studies skadi');
   assert(app.career.ties['boom|kite'] === -2, 'slayer friction');
   const promised = setPromise(structuredClone(app.career), 'wolf');
@@ -124,7 +143,7 @@ function run(): void {
   assert(offRole.error, 'study role');
   const answered = chooseRoom(app.career, 'a');
   assert(!answered.error && answered.career.roomSpent, answered.error ?? 'room choice');
-  assert(answered.career.roomEcho.length > 8, 'room echo');
+  assert(answered.career.roomEcho.length > 8 && /\b(I|We)\b/.test(answered.career.roomEcho), answered.career.roomEcho);
   assert(chooseRoom(answered.career, 'b').error, 'room once');
   app.career = answered.career;
   const bare = structuredClone(app.career);
@@ -157,6 +176,8 @@ function run(): void {
   assert(app.career.bounty !== null, 'bounty rerolled');
   assert((app.career.lastReport?.bountyNote ?? '').startsWith('Bounty'), 'bounty result');
   assert((app.career.lastReport?.roomNote ?? '').length > 8, 'room carried into the result');
+  const tape = app.career.lastReport ? tapeSpeech(app.career, app.career.lastReport) : null;
+  assert(tape && tape.text.length > 12 && app.career.players[tape.speakerId], tape?.text ?? 'tape speaks');
   assert(app.career.room && !app.career.roomSpent, 'next room');
   const circuit = runCircuitScrim(app.career, 'iron');
   assert(!circuit.error, circuit.error ?? 'circuit');
@@ -175,6 +196,25 @@ function run(): void {
   assert(new Set(rosterIds(you)).size === 6, 'trade duplicated a player');
   assert(Object.keys(traded.career.ties).some((key) => key.includes(incoming)), 'newcomer ties');
   app.career = traded.career;
+  const ids = app.career.orgs.map((team) => team.id).filter((id) => id !== app.career?.playerTeamId);
+  const bye = structuredClone(app.career);
+  bye.plan = null;
+  bye.stage = { kind: 'play-in' };
+  bye.playoffs = {
+    seeds: [bye.playerTeamId, ids[0], ids[1], ids[2], ids[3], ids[4]],
+    playIn: [
+      { homeId: ids[1], awayId: ids[4], homeWins: 0, awayWins: 0, done: false },
+      { homeId: ids[2], awayId: ids[3], homeWins: 0, awayWins: 0, done: false }
+    ],
+    semis: [],
+    final: null
+  };
+  const watched = playCurrentWeek(bye);
+  assert(watched.lastReport?.kind === 'bye' && watched.lastReport.won === undefined, 'top-seed bye is not a loss');
+  assert(watched.stage.kind === 'playoff-semi', `bye should reach the semi, got ${watched.stage.kind}`);
+  assert(watched.playoffs?.semis.some((series) => series.homeId === watched.playerTeamId), 'bye seed is in the semi');
+  const watchedLine = watched.lastReport ? tapeSpeech(watched, watched.lastReport).text : '';
+  assert(!/market/i.test(watchedLine), watchedLine);
   let guard = 0;
   let seasons = 0;
   while (app.career && seasons < 2 && guard < 90) {
@@ -187,6 +227,7 @@ function run(): void {
       seasons += 1;
       continue;
     }
+    const hadFixture = !!findPlayerFixture(app.career);
     app.career = autofill(app.career);
     const problems = lineupProblems(app.career);
     assert(problems.length === 0, `${app.career.stage.kind} lineup: ${problems.join('; ')}`);
@@ -194,6 +235,10 @@ function run(): void {
     app.career = playCurrentWeek(app.career);
     assertCareer(app.career);
     assert(app.career.lastReport, 'missing report');
+    if (!hadFixture) {
+      assert(app.career.lastReport?.kind === 'bye', 'a week without you is a bye');
+      assert(app.career.lastReport?.won === undefined, 'a bye is not a defeat');
+    }
     guard += 1;
     if (before === app.career.stage.kind && app.career.stage.kind !== 'offseason') {
       const stage = app.career.stage;

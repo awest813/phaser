@@ -32,6 +32,7 @@ import type {
   PlayoffState,
   Role,
   RoomEvent,
+  WeekPlan,
   ScrimReport,
   SeriesState,
   Strategy,
@@ -719,7 +720,9 @@ export function createCareer(input: OrgInput, seed: number): Career {
     promiseId: null,
     room: null,
     roomSpent: false,
-    roomEcho: ''
+    roomEcho: '',
+    plan: null,
+    planNote: ''
   };
   const notes = rollPatch(career, rng);
   refreshOffers(career, rng, true);
@@ -854,7 +857,10 @@ function trainAll(career: Career, rng: Rng, played: Set<string>): void {
       const onDev = team.dev.includes(id);
       const prodigy = player.trait === 'prodigy' && player.age <= 21 ? 1.3 : 1;
       const mult = facility.training * (onDev ? facility.dev : 1) * prodigy;
-      if (team.training === 'rest') {
+      const planned = team.player && !!career.plan;
+      if (planned) {
+        // The week's plan already paid out before the draft.
+      } else if (team.training === 'rest') {
         player.fatigue -= 14;
         player.morale = clamp(player.morale + 3, 5, 100);
       } else if (team.training === 'academy') {
@@ -884,7 +890,7 @@ function trainAll(career: Career, rng: Rng, played: Set<string>): void {
       player.morale = clamp(player.morale + (68 - player.morale) * 0.08, 5, 100);
       player.form = clamp(player.form * 0.84, -10, 10);
     }
-    if (team.training === 'synergy') team.chemistry = clamp(team.chemistry + 2, 15, 100);
+    if (team.training === 'synergy' && !(team.player && career.plan)) team.chemistry = clamp(team.chemistry + 2, 15, 100);
   }
 }
 
@@ -1153,14 +1159,14 @@ function applyRoom(career: Career, side: 'a' | 'b'): void {
       first.morale = clamp(first.morale + 6, 5, 100);
       second.morale = clamp(second.morale - 5, 5, 100);
       shiftTie(career, first.id, second.id, -1);
-      career.roomEcho = `${first.nick} got the block. ${second.nick} will remember it.`;
+      career.roomEcho = `I got the block. ${second.nick} will remember it.`;
     } else {
       first.morale = clamp(first.morale + 3, 5, 100);
       second.morale = clamp(second.morale + 3, 5, 100);
       first.fatigue = clamp(first.fatigue + 3, 0, 100);
       second.fatigue = clamp(second.fatigue + 3, 0, 100);
       shiftTie(career, first.id, second.id, 1);
-      career.roomEcho = `${first.nick} and ${second.nick} split the block. The edge between them softens.`;
+      career.roomEcho = 'We split the block. The edge between us can soften.';
     }
   } else if (room.kind === 'promise' && first) {
     if (side === 'a') {
@@ -1170,45 +1176,45 @@ function applyRoom(career: Career, side: 'a' | 'b'): void {
       }
       career.promiseId = first.id;
       first.morale = clamp(first.morale + 3, 5, 100);
-      career.roomEcho = `${first.nick} has this series if you queue them.`;
+      career.roomEcho = 'I will take this series if you queue me.';
     } else {
       first.morale = clamp(first.morale - 4, 5, 100);
       const leader = rosterIds(team).find((id) => career.players[id].trait === 'leader' && id !== first.id);
       if (leader) shiftTie(career, first.id, leader, -1);
-      career.roomEcho = `${first.nick} asked for the series and heard no.`;
+      career.roomEcho = 'I asked for the series. You said no.';
     }
   } else if (room.kind === 'rest' && first) {
     if (side === 'a') {
       first.fatigue = clamp(first.fatigue - 16, 0, 100);
       first.morale = clamp(first.morale + 2, 5, 100);
       if (career.promiseId === first.id) career.promiseId = null;
-      career.roomEcho = `${first.nick} spends the block off the PC.`;
+      career.roomEcho = 'I am off the PC. The wrist gets the block.';
     } else {
       first.fatigue = clamp(first.fatigue + 5, 0, 100);
       first.morale = clamp(first.morale + 3, 5, 100);
-      career.roomEcho = `${first.nick} pushes through the fatigue.`;
+      career.roomEcho = 'I will play through the fatigue.';
     }
   } else if (room.kind === 'study' && first && room.champId) {
     if (side === 'a') {
       first.study = room.champId;
       bumpMastery(first, room.champId, 4);
       first.morale = clamp(first.morale + 3, 5, 100);
-      career.roomEcho = `${first.nick} spends the week on ${champName(room.champId)}.`;
+      career.roomEcho = `I am on ${champName(room.champId)} this week.`;
     } else {
       first.morale = clamp(first.morale - 3, 5, 100);
       first.form = clamp(first.form - 1, -10, 10);
-      career.roomEcho = `${first.nick} stays on ${champName(first.study)}.`;
+      career.roomEcho = `I will stay on ${champName(first.study)}.`;
     }
   } else if (room.kind === 'film' && first) {
     if (side === 'a') {
       team.fans += 60;
       first.fatigue = clamp(first.fatigue + 8, 0, 100);
       first.morale = clamp(first.morale + 4, 5, 100);
-      career.roomEcho = `${first.nick} streams the garage. A few more people know the tag.`;
+      career.roomEcho = 'I am streaming the garage. A few more people will know the tag.';
     } else {
       team.chemistry = clamp(team.chemistry + 2, 15, 100);
       first.morale = clamp(first.morale + 2, 5, 100);
-      career.roomEcho = 'The stream stays off. The house gets the hour.';
+      career.roomEcho = 'Fine. The house gets the hour, and so do I.';
     }
   }
   if (career.roomEcho) pushNews(career, career.roomEcho);
@@ -1405,8 +1411,11 @@ function nextHook(career: Career): string {
 }
 
 export function playCurrentWeek(career: Career): Career {
-  const problems = lineupProblems(career);
-  if (problems.length) throw new Error(problems[0]);
+  const playing = !!findPlayerFixture(career);
+  if (playing) {
+    const problems = lineupProblems(career);
+    if (problems.length) throw new Error(problems[0]);
+  }
   const week = describeWeek(career);
   if (!week) throw new Error('No week to play.');
   const next = structuredClone(career);
@@ -1420,7 +1429,6 @@ export function playCurrentWeek(career: Career): Career {
     label: week.label,
     kind: fixtureList.find((fixture) => fixture.homeId === you || fixture.awayId === you)?.kind ?? 'bye',
     home: false,
-    won: false,
     games: [],
     cashDelta: 0,
     fansDelta: 0,
@@ -1439,7 +1447,7 @@ export function playCurrentWeek(career: Career): Career {
   if (next.room && !next.roomSpent) {
     const ignored = next.players[next.room.ids[0]];
     if (ignored) ignored.morale = clamp(ignored.morale - 4, 5, 100);
-    next.roomEcho = ignored ? `${ignored.nick} wanted a word before the match. You walked past them.` : 'The room was left alone.';
+    next.roomEcho = ignored ? 'You walked past me. I still wanted that word.' : 'I waited. Nobody came back.';
     next.roomSpent = true;
     pushNews(next, next.roomEcho);
   }
@@ -1488,6 +1496,7 @@ export function playCurrentWeek(career: Career): Career {
       also.push(`${home.tag} ${resolved.homeWins}–${resolved.awayWins} ${away.tag}`);
     }
   }
+  if (!playerPlayed) report.notes.unshift('You were not in this round.');
   if (also.length) report.notes.push(`Also this week: ${also.join(', ')}.`);
   if (playerPlayed) settleMinutes(next, queued, report.won === true, report, rng);
   if (next.lastScrim && next.scrimDone) report.notes.unshift(next.lastScrim.note);
@@ -1555,6 +1564,9 @@ export function playCurrentWeek(career: Career): Career {
   }
 
   advance(next, rng, report);
+  if (next.planNote) report.planNote = next.planNote;
+  next.plan = null;
+  next.planNote = '';
   next.scrimDone = false;
   if (next.roomEcho) report.roomNote = next.roomEcho;
   next.roomEcho = '';
@@ -1681,6 +1693,15 @@ function advance(career: Career, rng: Rng, report: WeekReport): void {
   }
   if (stage.kind === 'play-in' && career.playoffs) {
     const series = career.playoffs.playIn.find((entry) => entry.homeId === career.playerTeamId || entry.awayId === career.playerTeamId);
+    const bye = !series && career.playoffs.seeds.slice(0, 2).includes(career.playerTeamId);
+    if (bye) {
+      ensurePlayoffSemis(career);
+      career.playoffResult = 'Semifinal';
+      career.stage = { kind: 'playoff-semi' };
+      report.notes.push('The play-in is done. Your bye is over.');
+      pushNews(career, 'Play-in finished. The semifinal is next.');
+      return;
+    }
     const won = seriesWinner(series) === career.playerTeamId;
     if (!won) {
       simPlayoffRemainder(career, rng);
@@ -2090,6 +2111,8 @@ export function beginNextSeason(career: Career): { career: Career; error?: strin
   const rng = new Rng(next.rngState);
   const notes = rollPatch(next, rng);
   next.promiseId = null;
+  next.plan = null;
+  next.planNote = '';
   next.roomEcho = '';
   next.bounty = rollBounty(next, rng);
   next.room = rollRoom(next, rng);
@@ -2150,6 +2173,8 @@ export function normalizeCareer(career: Career): Career {
   career.room ??= null;
   career.roomSpent ??= false;
   career.roomEcho ??= '';
+  career.plan ??= null;
+  career.planNote ??= '';
   for (const player of Object.values(career.players)) {
     player.sat ??= 0;
     if (!player.study) player.study = bestMasteryId(player) || 'brynhild';
@@ -2171,6 +2196,50 @@ function finishScrim(career: Career, rng: Rng, report: ScrimReport): Career {
   career.rngState = rng.state;
   pushNews(career, report.note);
   return career;
+}
+
+export function lockPlan(career: Career, plan: WeekPlan): { career: Career; error?: string } {
+  if (career.stage.kind === 'offseason' || !findPlayerFixture(career)) return { career, error: 'There is no match to plan for.' };
+  if (career.plan || career.scrimDone) return { career, error: 'The plan is already locked.' };
+  if (plan === 'house' || plan === 'scrim') {
+    const fixture = findPlayerFixture(career);
+    const foeId = fixture ? opponentOf(fixture, career.playerTeamId) : '';
+    const result = plan === 'house' ? runHouseScrim(career) : runCircuitScrim(career, foeId);
+    if (result.error) return result;
+    result.career.plan = plan;
+    result.career.planNote = result.career.lastScrim?.note ?? 'The plan is locked.';
+    return result;
+  }
+  const next = structuredClone(career);
+  const team = playerTeam(next);
+  const facility = facilityAt(team.facility);
+  if (plan === 'study') {
+    const bits: string[] = [];
+    for (const id of rosterIds(team)) {
+      const player = next.players[id];
+      if (player.injured > 0) continue;
+      const before = player.mastery[player.study] ?? 0;
+      const gain = Math.max(2, Math.round((team.main.includes(id) ? 4 : 3) * facility.training));
+      bumpMastery(player, player.study, gain);
+      player.fatigue = clamp(player.fatigue + 5, 0, 100);
+      if (bits.length < 3) bits.push(`${player.nick} ${champName(player.study)} ${before}→${player.mastery[player.study]}`);
+    }
+    next.planNote = `Study block. ${bits.join(' · ')}.`;
+  } else {
+    let dropped = 0;
+    for (const id of rosterIds(team)) {
+      const player = next.players[id];
+      const before = player.fatigue;
+      player.fatigue = clamp(player.fatigue - 18, 0, 100);
+      player.morale = clamp(player.morale + 3, 5, 100);
+      dropped += before - player.fatigue;
+    }
+    next.planNote = `Rest day. ${Math.round(dropped)} fatigue came off the roster before the draft.`;
+  }
+  next.plan = plan;
+  next.scrimDone = true;
+  pushNews(next, next.planNote);
+  return { career: next };
 }
 
 export function runHouseScrim(career: Career): { career: Career; error?: string } {

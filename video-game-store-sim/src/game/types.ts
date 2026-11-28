@@ -162,7 +162,10 @@ export interface WeekReport {
   nextHook?: string;
   streakAfter?: number;
   roomNote?: string;
+  planNote?: string;
 }
+
+export type WeekPlan = 'scrim' | 'house' | 'study' | 'rest';
 
 export type RoomKind = 'share' | 'promise' | 'rest' | 'study' | 'film';
 
@@ -327,6 +330,8 @@ export interface Career {
   room: RoomEvent | null;
   roomSpent: boolean;
   roomEcho: string;
+  plan: WeekPlan | null;
+  planNote: string;
 }
 
 export interface AppState {
@@ -375,6 +380,7 @@ export type Action =
   | { type: 'next-season' }
   | { type: 'myth-filter'; myth: 'all' | Mythology }
   | { type: 'role-filter'; role: 'all' | Role }
+  | { type: 'plan'; plan: WeekPlan }
   | { type: 'scrim-house' }
   | { type: 'scrim-circuit'; opponentId: string }
   | { type: 'trade-accept'; id: number }
